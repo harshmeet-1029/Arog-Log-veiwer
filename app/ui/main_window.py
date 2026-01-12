@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
     QListWidget, QTextEdit, QLineEdit, QLabel, 
     QMessageBox, QSplitter, QGroupBox, QComboBox,
-    QMenuBar, QDialog, QDialogButtonBox
+    QMenuBar, QDialog, QDialogButtonBox, QFileDialog
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import (
@@ -161,7 +161,8 @@ class ThemeManager:
                     background-color: #ffffff;
                     color: #212121;
                     border-bottom: 1px solid #2196f3;
-                    padding: 8px 10px;
+                    margin-bottom: 10px;
+                    padding: 10px 10px;
                     spacing: 5px;
                 }
                 QMenuBar::item {
@@ -652,6 +653,7 @@ class MainWindow(QWidget):
         self.fullscreen_btn.setToolTip("Enter fullscreen mode (Logs only)")
         self.fullscreen_btn.clicked.connect(self.toggle_fullscreen)
         self.fullscreen_btn.setFixedSize(120, 28)
+        self.fullscreen_btn.setVisible(False)  # Hidden by default
         header_layout.addWidget(self.fullscreen_btn)
         
         layout.addLayout(header_layout)
@@ -729,6 +731,12 @@ class MainWindow(QWidget):
         clear_logs_btn.clicked.connect(lambda: self.log_output.clear())
         button_layout.addWidget(clear_logs_btn)
         
+        self.save_logs_btn = QPushButton("💾 Save Logs")
+        self.save_logs_btn.clicked.connect(self.save_logs_to_file)
+        self.save_logs_btn.setToolTip("Save logs to a text file")
+        self.save_logs_btn.setVisible(False)  # Hidden by default
+        button_layout.addWidget(self.save_logs_btn)
+        
         button_layout.addStretch()
         layout.addLayout(button_layout)
         
@@ -746,6 +754,8 @@ class MainWindow(QWidget):
         self.search_input.setEnabled(False)
         self.pod_list.setEnabled(False)
         self.stop_logs_btn.setEnabled(False)
+        self.fullscreen_btn.setVisible(False)
+        self.save_logs_btn.setVisible(False)
         self.status_label.setText("● Disconnected")
         self.status_label.setStyleSheet("color: red; font-weight: bold; font-size: 11pt;")
     
@@ -914,6 +924,10 @@ class MainWindow(QWidget):
         
         self.stop_logs_btn.setEnabled(True)
         
+        # Show fullscreen and save buttons when pod is selected
+        self.fullscreen_btn.setVisible(True)
+        self.save_logs_btn.setVisible(True)
+        
         logger.info("Starting logs worker")
         self.worker.start()
     
@@ -1024,6 +1038,55 @@ class MainWindow(QWidget):
         cursor = self.log_output.textCursor()
         cursor.clearSelection()
         self.log_output.setTextCursor(cursor)
+    
+    def save_logs_to_file(self):
+        """Save the current logs to a text file."""
+        logger.info("Save logs to file requested")
+        
+        # Get the current log content
+        log_content = self.log_output.toPlainText()
+        
+        if not log_content:
+            QMessageBox.warning(self._get_active_window(), "No Logs", "There are no logs to save.")
+            return
+        
+        # Get the current pod name for default filename
+        pod_name = self.current_pod_label.text().replace("Viewing logs for: ", "").replace(":", "-")
+        if not pod_name or pod_name == "No pod selected":
+            pod_name = "logs"
+        
+        # Generate default filename with timestamp
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        default_filename = f"{pod_name}_{timestamp}.txt"
+        
+        # Open file dialog
+        file_path, _ = QFileDialog.getSaveFileName(
+            self._get_active_window(),
+            "Save Logs",
+            default_filename,
+            "Text Files (*.txt);;Log Files (*.log);;All Files (*.*)"
+        )
+        
+        if file_path:
+            try:
+                # Write logs to file
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(log_content)
+                
+                logger.info(f"Logs saved successfully to: {file_path}")
+                QMessageBox.information(
+                    self._get_active_window(),
+                    "Success",
+                    f"Logs saved successfully to:\n{file_path}"
+                )
+            except Exception as e:
+                logger.error(f"Error saving logs: {e}")
+                QMessageBox.critical(
+                    self._get_active_window(),
+                    "Error",
+                    f"Failed to save logs:\n{str(e)}"
+                )
     
     def toggle_fullscreen(self):
         """Toggle fullscreen mode for the log viewer."""
