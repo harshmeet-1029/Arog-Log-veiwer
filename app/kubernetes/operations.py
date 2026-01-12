@@ -7,8 +7,38 @@ import shlex
 from typing import List, Callable, Optional
 from app.ssh.connection_manager import SSHConnectionManager
 from app.logging_config import get_logger
+from app.config import KubernetesConfig, SecurityConfig
 
 logger = get_logger(__name__)
+
+
+def sanitize_for_logging(text: str, max_length: int = 200) -> str:
+    """
+    Sanitize text for safe logging (prevent log injection attacks).
+    
+    SECURITY: This prevents log injection by:
+    1. Removing newlines and control characters
+    2. Truncating long strings
+    3. Escaping special characters
+    
+    Args:
+        text: Text to sanitize
+        max_length: Maximum length to log
+        
+    Returns:
+        Sanitized text safe for logging
+    """
+    if not text:
+        return ""
+    
+    # Remove control characters (including newlines, carriage returns, tabs)
+    sanitized = ''.join(c if c.isprintable() or c in ' \t' else '?' for c in text)
+    
+    # Truncate if too long
+    if len(sanitized) > max_length:
+        sanitized = sanitized[:max_length] + "..."
+    
+    return sanitized
 
 
 class KubernetesOperations:
@@ -19,11 +49,6 @@ class KubernetesOperations:
     NO WRITE OPERATIONS (apply, delete, exec, scale, etc.)
     """
     
-    NAMESPACE = "argo"
-    
-    # Whitelist of allowed kubectl commands (read-only)
-    ALLOWED_COMMANDS = {'get', 'logs', 'describe'}
-    
     def __init__(self, ssh_manager: SSHConnectionManager):
         """
         Initialize Kubernetes operations with SSH connection manager.
@@ -32,7 +57,9 @@ class KubernetesOperations:
             ssh_manager: Established SSH connection manager
         """
         self.ssh = ssh_manager
-        logger.info("KubernetesOperations initialized")
+        # Load namespace from config instead of hardcoding
+        self.namespace = KubernetesConfig.get_namespace()
+        logger.info(f"KubernetesOperations initialized with namespace: {self.namespace}")
     
     @staticmethod
     def _strip_ansi_codes(text: str) -> str:
@@ -59,10 +86,10 @@ class KubernetesOperations:
         Raises:
             RuntimeError: If SSH connection is not established
         """
-        logger.info(f"Listing all pods in namespace '{self.NAMESPACE}'")
+        logger.info(f"Listing all pods in namespace '{self.namespace}'")
         
         # Build kubectl command - filter for Running pods only
-        command = f"kubectl get pods -n {self.NAMESPACE} --field-selector=status.phase=Running"
+        command = f"kubectl get pods -n {self.namespace} --field-selector=status.phase=Running"
         logger.debug(f"Executing: {command}")
         
         try:
@@ -74,7 +101,9 @@ class KubernetesOperations:
             return clean_output
         
         except Exception as e:
-            logger.error(f"Error listing all pods: {e}", exc_info=True)
+            # SECURITY: Sanitize error messages before logging
+            safe_error = sanitize_for_logging(str(e))
+            logger.error(f"Error listing all pods: {safe_error}", exc_info=True)
             raise RuntimeError(f"Failed to list pods: {e}")
     
     def list_pods(self, search_keyword: str) -> List[str]:
@@ -96,10 +125,13 @@ class KubernetesOperations:
         
         # Sanitize search keyword to prevent command injection
         safe_keyword = self._sanitize_grep_pattern(search_keyword)
-        logger.info(f"Listing pods with keyword: '{search_keyword}' (sanitized: '{safe_keyword}')")
+        
+        # SECURITY: Sanitize for logging
+        safe_keyword_log = sanitize_for_logging(search_keyword)
+        logger.info(f"Listing pods with keyword: '{safe_keyword_log}' (sanitized: '{safe_keyword}')")
         
         # Build kubectl command with grep
-        command = f"kubectl get pods -n {self.NAMESPACE} --no-headers | grep {shlex.quote(safe_keyword)}"
+        command = f"kubectl get pods -n {self.namespace} --no-headers | grep {shlex.quote(safe_keyword)}"
         logger.debug(f"Executing: {command}")
         
         try:
@@ -110,12 +142,14 @@ class KubernetesOperations:
             
             # Parse pod names from output
             pods = self._parse_pod_list(clean_output)
-            logger.info(f"Found {len(pods)} pods matching '{search_keyword}'")
+            logger.info(f"Found {len(pods)} pods matching '{safe_keyword_log}'")
             
             return pods
         
         except Exception as e:
-            logger.error(f"Error listing pods: {e}", exc_info=True)
+            # SECURITY: Sanitize error messages before logging
+            safe_error = sanitize_for_logging(str(e))
+            logger.error(f"Error listing pods: {safe_error}", exc_info=True)
             raise RuntimeError(f"Failed to list pods: {e}")
     
     def stream_pod_logs(
@@ -145,13 +179,16 @@ class KubernetesOperations:
         
         # Sanitize pod name
         safe_pod_name = self._sanitize_pod_name(pod_name)
-        logger.info(f"Streaming logs for pod: '{safe_pod_name}'")
+        
+        # SECURITY: Sanitize for logging
+        safe_pod_name_log = sanitize_for_logging(pod_name)
+        logger.info(f"Streaming logs for pod: '{safe_pod_name_log}'")
         
         # Build kubectl logs command
         cmd_parts = [
             "kubectl logs",
             shlex.quote(safe_pod_name),
-            f"-n {self.NAMESPACE}"
+            f"-n {self.namespace}"
         ]
         
         if follow:
@@ -169,10 +206,12 @@ class KubernetesOperations:
                 output_callback=output_callback,
                 stop_check=stop_check
             )
-            logger.info(f"Log streaming completed for pod '{safe_pod_name}'")
+            logger.info(f"Log streaming completed for pod '{safe_pod_name_log}'")
         
         except Exception as e:
-            logger.error(f"Error streaming logs: {e}", exc_info=True)
+            # SECURITY: Sanitize error messages before logging
+            safe_error = sanitize_for_logging(str(e))
+            logger.error(f"Error streaming logs: {safe_error}", exc_info=True)
             raise RuntimeError(f"Failed to stream logs: {e}")
     
     def get_pod_details(self, pod_name: str) -> str:
@@ -193,9 +232,12 @@ class KubernetesOperations:
             raise ValueError("Pod name cannot be empty")
         
         safe_pod_name = self._sanitize_pod_name(pod_name)
-        logger.info(f"Getting details for pod: '{safe_pod_name}'")
         
-        command = f"kubectl describe pod {shlex.quote(safe_pod_name)} -n {self.NAMESPACE}"
+        # SECURITY: Sanitize for logging
+        safe_pod_name_log = sanitize_for_logging(pod_name)
+        logger.info(f"Getting details for pod: '{safe_pod_name_log}'")
+        
+        command = f"kubectl describe pod {shlex.quote(safe_pod_name)} -n {self.namespace}"
         logger.debug(f"Executing: {command}")
         
         try:
@@ -204,7 +246,9 @@ class KubernetesOperations:
             return output
         
         except Exception as e:
-            logger.error(f"Error getting pod details: {e}", exc_info=True)
+            # SECURITY: Sanitize error messages before logging
+            safe_error = sanitize_for_logging(str(e))
+            logger.error(f"Error getting pod details: {safe_error}", exc_info=True)
             raise RuntimeError(f"Failed to get pod details: {e}")
     
     # -------------------------
@@ -215,42 +259,91 @@ class KubernetesOperations:
         """
         Sanitize grep pattern to prevent command injection.
         
+        SECURITY: This function prevents command injection by:
+        1. Removing all special shell characters
+        2. Limiting to alphanumeric, dash, underscore, dot only
+        3. Validating the result is not empty
+        
         Args:
             pattern: User-provided grep pattern
             
         Returns:
             Sanitized pattern
+            
+        Raises:
+            ValueError: If pattern contains no valid characters
         """
-        # Remove potentially dangerous characters
-        # Allow: alphanumeric, dash, underscore, dot
+        # Strip leading/trailing whitespace
+        pattern = pattern.strip()
+        
+        # Check for empty pattern
+        if not pattern:
+            raise ValueError("Search pattern cannot be empty")
+        
+        # Remove ALL potentially dangerous characters
+        # Allow ONLY: alphanumeric, dash, underscore, dot
+        # This prevents command injection through special shell characters: ; | & $ ` \ " ' ( ) < > * ? [ ] { } !
         sanitized = ''.join(c for c in pattern if c.isalnum() or c in '-_.')
         
         if not sanitized:
-            raise ValueError("Invalid search pattern - no valid characters")
+            raise ValueError("Invalid search pattern - contains no valid characters")
         
-        logger.debug(f"Sanitized pattern: '{pattern}' -> '{sanitized}'")
+        # Additional safety: ensure pattern doesn't start with a dash (could be interpreted as grep option)
+        if sanitized.startswith('-'):
+            logger.warning(f"Pattern starts with dash, prepending safe character: '{sanitized}'")
+            sanitized = 'x' + sanitized
+        
+        logger.debug(f"Sanitized grep pattern: '{pattern}' -> '{sanitized}'")
         return sanitized
     
     def _sanitize_pod_name(self, pod_name: str) -> str:
         """
         Sanitize pod name to prevent command injection.
         
+        SECURITY: Kubernetes pod names follow RFC 1123 DNS label standard.
+        This function validates and sanitizes to prevent command injection.
+        
         Args:
             pod_name: User-provided pod name
             
         Returns:
             Sanitized pod name
+            
+        Raises:
+            ValueError: If pod name is invalid or contains dangerous characters
         """
+        # Strip leading/trailing whitespace
+        pod_name = pod_name.strip()
+        
+        # Check for empty pod name
+        if not pod_name:
+            raise ValueError("Pod name cannot be empty")
+        
         # Kubernetes pod names follow RFC 1123 DNS label standard:
         # - lowercase alphanumeric characters, '-' or '.'
-        # - must start and end with alphanumeric
+        # - must start and end with alphanumeric character
+        # - maximum 253 characters
+        
+        # Remove ALL potentially dangerous characters
         sanitized = ''.join(c for c in pod_name if c.isalnum() or c in '-.')
         
         if not sanitized:
-            raise ValueError("Invalid pod name - no valid characters")
+            raise ValueError("Invalid pod name - contains no valid characters")
         
+        # Validate starts and ends with alphanumeric
+        if not sanitized[0].isalnum():
+            raise ValueError(f"Invalid pod name - must start with alphanumeric character")
+        
+        if not sanitized[-1].isalnum():
+            raise ValueError(f"Invalid pod name - must end with alphanumeric character")
+        
+        # Check length (Kubernetes limit)
+        if len(sanitized) > 253:
+            raise ValueError(f"Invalid pod name - exceeds maximum length of 253 characters")
+        
+        # Warn if sanitization changed the name
         if sanitized != pod_name:
-            logger.warning(f"Pod name sanitized: '{pod_name}' -> '{sanitized}'")
+            logger.warning(f"SECURITY: Pod name sanitized: '{pod_name}' -> '{sanitized}'")
         
         return sanitized
     

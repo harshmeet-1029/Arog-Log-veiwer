@@ -17,6 +17,9 @@ from PySide6.QtGui import (
 from app.ssh.argo_worker import ArgoWorker
 from app.ssh.connection_manager import SSHConnectionManager
 from app.logging_config import get_logger
+from app.config import SecurityConfig
+import os
+import stat
 
 logger = get_logger(__name__)
 
@@ -519,6 +522,12 @@ class MainWindow(QWidget):
         shortcuts_action.setStatusTip("View keyboard shortcuts")
         shortcuts_action.triggered.connect(self._show_shortcuts_dialog)
         help_menu.addAction(shortcuts_action)
+        
+        # SSH Configuration Guide
+        ssh_config_action = QAction("SSH Configuration Guide", self)
+        ssh_config_action.setStatusTip("View SSH setup instructions for your OS")
+        ssh_config_action.triggered.connect(self._show_ssh_config_dialog)
+        help_menu.addAction(ssh_config_action)
 
         return menu_bar
     
@@ -864,8 +873,9 @@ class MainWindow(QWidget):
         
         keyword = self.search_input.text().strip()
         if not keyword:
-            logger.warning("No search keyword provided")
-            QMessageBox.warning(self, "Input Required", "Please enter a search keyword")
+            logger.info("No search keyword provided - fetching all pods instead")
+            # If keyword is empty, list all pods (same as refresh)
+            self.refresh_pods()
             return
         
         # Stop any active log streaming first to free up the SSH shell
@@ -1073,6 +1083,16 @@ class MainWindow(QWidget):
                 # Write logs to file
                 with open(file_path, 'w', encoding='utf-8') as f:
                     f.write(log_content)
+                
+                # SECURITY: Set secure file permissions (owner read/write only)
+                # This prevents other users from reading potentially sensitive logs
+                secure_perms = SecurityConfig.get_secure_file_permissions()
+                if secure_perms and os.name != 'nt':  # Unix-like systems only
+                    try:
+                        os.chmod(file_path, secure_perms)
+                        logger.info(f"SECURITY: Set secure file permissions {oct(secure_perms)} on {file_path}")
+                    except Exception as perm_error:
+                        logger.warning(f"Could not set secure file permissions: {perm_error}")
                 
                 logger.info(f"Logs saved successfully to: {file_path}")
                 QMessageBox.information(
@@ -1497,6 +1517,293 @@ class MainWindow(QWidget):
         
         shortcuts_text.setHtml(shortcuts_content)
         layout.addWidget(shortcuts_text)
+        
+        # OK button
+        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
+        button_box.accepted.connect(dialog.accept)
+        layout.addWidget(button_box)
+        
+        dialog.setLayout(layout)
+        
+        # Apply current theme to dialog
+        if self.current_theme == "dark":
+            dialog.setStyleSheet("""
+                QDialog {
+                    background-color: #2b2b2b;
+                    color: #e0e0e0;
+                }
+                QTextEdit {
+                    background-color: #1e1e1e;
+                    color: #e0e0e0;
+                    border: 1px solid #3c3c3c;
+                }
+                QLabel a {
+                    color: #4a9eff;
+                }
+            """)
+        else:
+            dialog.setStyleSheet("""
+                QDialog {
+                    background-color: #ffffff;
+                    color: #212121;
+                }
+                QTextEdit {
+                    background-color: #fafafa;
+                    color: #212121;
+                    border: 1px solid #ccc;
+                }
+            """)
+        
+        dialog.exec()
+    
+    def _show_ssh_config_dialog(self):
+        """Show the SSH Configuration Guide dialog."""
+        logger.info("Showing SSH Configuration Guide dialog")
+        
+        dialog = QDialog(self)
+        dialog.setWindowTitle("SSH Configuration Guide")
+        dialog.setMinimumWidth(600)
+        dialog.setMinimumHeight(500)
+        
+        layout = QVBoxLayout()
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Title
+        title_label = QLabel("SSH Configuration Guide")
+        title_font = QFont()
+        title_font.setPointSize(14)
+        title_font.setBold(True)
+        title_label.setFont(title_font)
+        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(title_label)
+        
+        # Separator
+        layout.addSpacing(10)
+        
+        # SSH Config content
+        ssh_config_text = QTextEdit()
+        ssh_config_text.setReadOnly(True)
+        ssh_config_text.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+        
+        # Detect current OS
+        import platform
+        current_os = platform.system()
+        
+        # Determine theme-specific colors
+        if self.current_theme == "dark":
+            table_bg = "#3c3c3c"
+            table_border = "#555"
+            code_bg = "#2b2b2b"
+            code_fg = "#4af626"
+            highlight_color = "#2196f3"
+            text_color = "#e0e0e0"
+            hr_color = "#555"
+        else:
+            table_bg = "#f5f5f5"
+            table_border = "#ccc"
+            code_bg = "#f0f0f0"
+            code_fg = "#c7254e"
+            highlight_color = "#2196f3"
+            text_color = "#212121"
+            hr_color = "#ddd"
+        
+        ssh_config_content = f"""
+<h3>📁 SSH Credential Locations by Operating System</h3>
+
+<p><b>Current System Detected:</b> <span style="color: {highlight_color};">{current_os}</span></p>
+
+<hr style="border: 1px solid {hr_color};">
+
+<h4>🪟 <b>Windows</b></h4>
+<table cellpadding="8" cellspacing="0" style="width: 100%; background-color: {table_bg}; border: 1px solid {table_border};">
+    <tr>
+        <td style="width: 35%;"><b>SSH Config File:</b></td>
+        <td><code style="background-color: {code_bg}; color: {code_fg}; padding: 2px 4px;">C:\\Users\\YourUsername\\.ssh\\config</code></td>
+    </tr>
+    <tr>
+        <td><b>Private Keys:</b></td>
+        <td><code style="background-color: {code_bg}; color: {code_fg}; padding: 2px 4px;">C:\\Users\\YourUsername\\.ssh\\id_rsa</code><br>
+            <code style="background-color: {code_bg}; color: {code_fg}; padding: 2px 4px;">C:\\Users\\YourUsername\\.ssh\\id_ed25519</code></td>
+    </tr>
+    <tr>
+        <td><b>Public Keys:</b></td>
+        <td><code style="background-color: {code_bg}; color: {code_fg}; padding: 2px 4px;">C:\\Users\\YourUsername\\.ssh\\id_rsa.pub</code><br>
+            <code style="background-color: {code_bg}; color: {code_fg}; padding: 2px 4px;">C:\\Users\\YourUsername\\.ssh\\id_ed25519.pub</code></td>
+    </tr>
+    <tr>
+        <td><b>Known Hosts:</b></td>
+        <td><code style="background-color: {code_bg}; color: {code_fg}; padding: 2px 4px;">C:\\Users\\YourUsername\\.ssh\\known_hosts</code></td>
+    </tr>
+    <tr>
+        <td><b>Shortcut:</b></td>
+        <td><code style="background-color: {code_bg}; color: {code_fg}; padding: 2px 4px;">%USERPROFILE%\\.ssh\\</code></td>
+    </tr>
+</table>
+
+<p><b>Windows Command to Open SSH Directory:</b></p>
+<pre style="background-color: {code_bg}; color: {code_fg}; padding: 10px; border-radius: 5px;">cd %USERPROFILE%\\.ssh
+notepad config</pre>
+
+<hr style="border: 1px solid {hr_color};">
+
+<h4>🐧 <b>Linux</b></h4>
+<table cellpadding="8" cellspacing="0" style="width: 100%; background-color: {table_bg}; border: 1px solid {table_border};">
+    <tr>
+        <td style="width: 35%;"><b>SSH Config File:</b></td>
+        <td><code style="background-color: {code_bg}; color: {code_fg}; padding: 2px 4px;">/home/yourusername/.ssh/config</code></td>
+    </tr>
+    <tr>
+        <td><b>Private Keys:</b></td>
+        <td><code style="background-color: {code_bg}; color: {code_fg}; padding: 2px 4px;">/home/yourusername/.ssh/id_rsa</code><br>
+            <code style="background-color: {code_bg}; color: {code_fg}; padding: 2px 4px;">/home/yourusername/.ssh/id_ed25519</code></td>
+    </tr>
+    <tr>
+        <td><b>Public Keys:</b></td>
+        <td><code style="background-color: {code_bg}; color: {code_fg}; padding: 2px 4px;">/home/yourusername/.ssh/id_rsa.pub</code><br>
+            <code style="background-color: {code_bg}; color: {code_fg}; padding: 2px 4px;">/home/yourusername/.ssh/id_ed25519.pub</code></td>
+    </tr>
+    <tr>
+        <td><b>Known Hosts:</b></td>
+        <td><code style="background-color: {code_bg}; color: {code_fg}; padding: 2px 4px;">/home/yourusername/.ssh/known_hosts</code></td>
+    </tr>
+    <tr>
+        <td><b>Shortcut:</b></td>
+        <td><code style="background-color: {code_bg}; color: {code_fg}; padding: 2px 4px;">~/.ssh/</code></td>
+    </tr>
+</table>
+
+<p><b>Linux Commands:</b></p>
+<pre style="background-color: {code_bg}; color: {code_fg}; padding: 10px; border-radius: 5px;">cd ~/.ssh
+ls -la
+nano config  # or vim config</pre>
+
+<hr style="border: 1px solid {hr_color};">
+
+<h4>🍎 <b>macOS</b></h4>
+<table cellpadding="8" cellspacing="0" style="width: 100%; background-color: {table_bg}; border: 1px solid {table_border};">
+    <tr>
+        <td style="width: 35%;"><b>SSH Config File:</b></td>
+        <td><code style="background-color: {code_bg}; color: {code_fg}; padding: 2px 4px;">/Users/YourUsername/.ssh/config</code></td>
+    </tr>
+    <tr>
+        <td><b>Private Keys:</b></td>
+        <td><code style="background-color: {code_bg}; color: {code_fg}; padding: 2px 4px;">/Users/YourUsername/.ssh/id_rsa</code><br>
+            <code style="background-color: {code_bg}; color: {code_fg}; padding: 2px 4px;">/Users/YourUsername/.ssh/id_ed25519</code></td>
+    </tr>
+    <tr>
+        <td><b>Public Keys:</b></td>
+        <td><code style="background-color: {code_bg}; color: {code_fg}; padding: 2px 4px;">/Users/YourUsername/.ssh/id_rsa.pub</code><br>
+            <code style="background-color: {code_bg}; color: {code_fg}; padding: 2px 4px;">/Users/YourUsername/.ssh/id_ed25519.pub</code></td>
+    </tr>
+    <tr>
+        <td><b>Known Hosts:</b></td>
+        <td><code style="background-color: {code_bg}; color: {code_fg}; padding: 2px 4px;">/Users/YourUsername/.ssh/known_hosts</code></td>
+    </tr>
+    <tr>
+        <td><b>Shortcut:</b></td>
+        <td><code style="background-color: {code_bg}; color: {code_fg}; padding: 2px 4px;">~/.ssh/</code></td>
+    </tr>
+</table>
+
+<p><b>macOS Commands:</b></p>
+<pre style="background-color: {code_bg}; color: {code_fg}; padding: 10px; border-radius: 5px;">cd ~/.ssh
+ls -la
+open -e config  # Opens in TextEdit</pre>
+
+<hr style="border: 1px solid {hr_color};">
+
+<h3>📝 Sample SSH Config File</h3>
+
+<p>Create or edit <code style="background-color: {code_bg}; color: {code_fg}; padding: 2px 4px;">~/.ssh/config</code> (or <code style="background-color: {code_bg}; color: {code_fg}; padding: 2px 4px;">%USERPROFILE%\\.ssh\\config</code> on Windows):</p>
+
+<pre style="background-color: {code_bg}; color: {code_fg}; padding: 10px; border-radius: 5px; font-family: 'Courier New', monospace;"># Jump Host Configuration
+Host usejump
+    HostName jump.example.com
+    User your-username
+    Port 22
+    IdentityFile ~/.ssh/id_rsa
+    
+# Alternative Host
+Host myjump
+    HostName 192.168.1.100
+    User admin
+    IdentityFile ~/.ssh/id_ed25519</pre>
+
+<hr style="border: 1px solid {hr_color};">
+
+<h3>🔑 Generating SSH Keys</h3>
+
+<p><b>All Operating Systems (in terminal/command prompt):</b></p>
+
+<pre style="background-color: {code_bg}; color: {code_fg}; padding: 10px; border-radius: 5px;"># RSA 4096-bit (widely compatible)
+ssh-keygen -t rsa -b 4096 -C "your-email@example.com"
+
+# Ed25519 (modern, recommended)
+ssh-keygen -t ed25519 -C "your-email@example.com"</pre>
+
+<hr style="border: 1px solid {hr_color};">
+
+<h3>🔒 Setting Correct Permissions</h3>
+
+<h4>Linux/macOS:</h4>
+<pre style="background-color: {code_bg}; color: {code_fg}; padding: 10px; border-radius: 5px;">chmod 700 ~/.ssh
+chmod 600 ~/.ssh/config
+chmod 600 ~/.ssh/id_rsa
+chmod 600 ~/.ssh/id_ed25519
+chmod 644 ~/.ssh/id_rsa.pub
+chmod 644 ~/.ssh/known_hosts</pre>
+
+<h4>Windows:</h4>
+<p>Windows handles permissions differently. If using OpenSSH for Windows:</p>
+<pre style="background-color: {code_bg}; color: {code_fg}; padding: 10px; border-radius: 5px;">icacls %USERPROFILE%\\.ssh\\id_rsa /inheritance:r
+icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
+
+<hr style="border: 1px solid {hr_color};">
+
+<h3>✅ Quick Setup Checklist</h3>
+
+<ol>
+    <li>✓ SSH directory exists (<code style="background-color: {code_bg}; color: {code_fg}; padding: 2px 4px;">~/.ssh</code> or <code style="background-color: {code_bg}; color: {code_fg}; padding: 2px 4px;">%USERPROFILE%\\.ssh</code>)</li>
+    <li>✓ SSH keys generated (private and public key pair)</li>
+    <li>✓ SSH config file created with jump host configuration</li>
+    <li>✓ Public key added to remote servers' <code style="background-color: {code_bg}; color: {code_fg}; padding: 2px 4px;">authorized_keys</code></li>
+    <li>✓ Correct permissions set on SSH files</li>
+    <li>✓ Test connection manually: <code style="background-color: {code_bg}; color: {code_fg}; padding: 2px 4px;">ssh usejump</code></li>
+</ol>
+
+<hr style="border: 1px solid {hr_color};">
+
+<h3>🆘 Troubleshooting</h3>
+
+<table cellpadding="8" cellspacing="0" style="width: 100%; border: 1px solid {table_border};">
+    <tr style="background-color: {table_bg};">
+        <td style="width: 40%; border: 1px solid {table_border};"><b>Problem:</b> Permission denied (publickey)</td>
+        <td style="border: 1px solid {table_border};"><b>Solution:</b> Add your public key to remote server's <code style="background-color: {code_bg}; color: {code_fg}; padding: 2px 4px;">~/.ssh/authorized_keys</code></td>
+    </tr>
+    <tr>
+        <td style="border: 1px solid {table_border};"><b>Problem:</b> Host key verification failed</td>
+        <td style="border: 1px solid {table_border};"><b>Solution:</b> Connect manually first to verify and add host key</td>
+    </tr>
+    <tr style="background-color: {table_bg};">
+        <td style="border: 1px solid {table_border};"><b>Problem:</b> Config file not found</td>
+        <td style="border: 1px solid {table_border};"><b>Solution:</b> Create it manually in the SSH directory</td>
+    </tr>
+    <tr>
+        <td style="border: 1px solid {table_border};"><b>Problem:</b> Bad permissions error</td>
+        <td style="border: 1px solid {table_border};"><b>Solution:</b> Run the permission commands above</td>
+    </tr>
+</table>
+
+<hr style="border: 1px solid {hr_color};">
+
+<p style="text-align: center; color: gray; font-size: 9pt;">
+<b>Need more help?</b> Contact: harshmeet.singh@netcoreunbxd.com
+</p>
+        """
+        
+        ssh_config_text.setHtml(ssh_config_content)
+        layout.addWidget(ssh_config_text)
         
         # OK button
         button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)

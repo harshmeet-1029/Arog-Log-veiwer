@@ -8,6 +8,7 @@ import os
 import paramiko
 from typing import Optional, Callable
 from app.logging_config import get_logger
+from app.config import SSHConfig, SecurityConfig
 
 logger = get_logger(__name__)
 
@@ -61,7 +62,7 @@ class SSHConnectionManager:
             logger.info("Starting SSH connection sequence")
             
             # Load SSH config
-            ssh_config_path = os.path.expanduser("~/.ssh/config")
+            ssh_config_path = SSHConfig.get_ssh_config_path()
             ssh_config = paramiko.SSHConfig()
             if os.path.exists(ssh_config_path):
                 logger.debug(f"Loading SSH config from {ssh_config_path}")
@@ -70,17 +71,30 @@ class SSHConnectionManager:
             else:
                 logger.warning(f"SSH config not found at {ssh_config_path}")
             
+            # Get connection parameters from config (not hardcoded)
+            jump_host = SSHConfig.get_jump_host()
+            internal_host = SSHConfig.get_internal_host()
+            service_account = SSHConfig.get_service_account()
+            
             # Step 1: Connect to jump host
-            self._emit_output("[CMD] ssh usejump\n")
-            logger.info("Step 1: Connecting to jump host 'usejump'")
+            self._emit_output(f"[CMD] ssh {jump_host}\n")
+            logger.info(f"Step 1: Connecting to jump host '{jump_host}'")
             
             self.client = paramiko.SSHClient()
             self.client.load_system_host_keys()
-            self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            # SECURITY: Use WarningPolicy instead of AutoAddPolicy to prevent MITM attacks
+            # This will warn about unknown hosts but still connect (better than blindly accepting)
+            # For production, consider using RejectPolicy and manage known_hosts properly
+            if SecurityConfig.get_strict_host_key_checking():
+                logger.info("SECURITY: Strict host key checking enabled - using RejectPolicy")
+                self.client.set_missing_host_key_policy(paramiko.RejectPolicy())
+            else:
+                logger.warning("SECURITY: Using WarningPolicy for host keys - consider enabling strict checking")
+                self.client.set_missing_host_key_policy(paramiko.WarningPolicy())
             
             # Get connection parameters from SSH config
-            host_config = ssh_config.lookup("usejump")
-            hostname = host_config.get("hostname", "usejump")
+            host_config = ssh_config.lookup(jump_host)
+            hostname = host_config.get("hostname", jump_host)
             port = int(host_config.get("port", 22))
             username = host_config.get("user", None)
             identity_file = host_config.get("identityfile", None)
@@ -117,22 +131,22 @@ class SSHConnectionManager:
             logger.info("✓ Received initial prompt from jump host")
             
             # Step 3: SSH to internal server
-            self._emit_output("[CMD] ssh 10.0.34.231\n")
-            logger.info("Step 2: Connecting to internal server 10.0.34.231")
+            self._emit_output(f"[CMD] ssh {internal_host}\n")
+            logger.info(f"Step 2: Connecting to internal server {internal_host}")
             
-            self._send_command("ssh 10.0.34.231")
+            self._send_command(f"ssh {internal_host}")
             self._wait_for_prompt(timeout=10.0)
             logger.info("✓ Successfully connected to internal server")
             self._emit_output("[OK] Connected to internal server\n")
             
             # Step 4: sudo su to service account
-            self._emit_output("[CMD] sudo su - solutions01-prod-us-east-1-eks\n")
-            logger.info("Step 3: Switching to solutions01-prod-us-east-1-eks user")
+            self._emit_output(f"[CMD] sudo su - {service_account}\n")
+            logger.info(f"Step 3: Switching to {service_account} user")
             
-            self._send_command("sudo su - solutions01-prod-us-east-1-eks")
+            self._send_command(f"sudo su - {service_account}")
             self._wait_for_prompt(timeout=5.0)
             logger.info("✓ Successfully switched to service account")
-            self._emit_output("[OK] Switched to solutions01-prod-us-east-1-eks\n")
+            self._emit_output(f"[OK] Switched to {service_account}\n")
             
             self.connected = True
             logger.info("SSH connection chain established successfully")
