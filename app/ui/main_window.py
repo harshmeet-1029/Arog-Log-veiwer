@@ -303,6 +303,11 @@ class MainWindow(QWidget):
         self.is_fullscreen = False
         self.original_parent = None
         
+        # Search state
+        self.current_search_term = ""
+        self.search_occurrences = []
+        self.current_occurrence_index = -1
+        
         logger.debug("Building UI components")
         self._build_ui()
         self._setup_shortcuts()
@@ -386,6 +391,68 @@ class MainWindow(QWidget):
         
         logger.info("Keyboard shortcuts configured: Ctrl+F/Cmd+F (Find), F3 (Next), Shift+F3 (Previous), Esc (Smart close), F11 (Fullscreen)")
     
+    def _get_active_window(self):
+        """Get the currently active window (fullscreen or main window)."""
+        if self.is_fullscreen and hasattr(self, 'fullscreen_window'):
+            return self.fullscreen_window
+        return self
+    
+    def _find_all_occurrences(self, search_text):
+        """Find all occurrences of search text and return their positions (start positions)."""
+        if not search_text:
+            return []
+        
+        occurrences = []
+        document = self.log_output.document()
+        cursor = QTextCursor(document)
+        cursor.movePosition(QTextCursor.MoveOperation.Start)
+        
+        # Find all occurrences
+        while True:
+            cursor = document.find(search_text, cursor, QTextDocument.FindFlag(0))
+            if cursor.isNull():
+                break
+            # cursor.position() is at the END of the match after find()
+            # Store the START position for proper jumping
+            start_pos = cursor.position() - len(search_text)
+            occurrences.append(start_pos)
+        
+        return occurrences
+    
+    def _update_match_counter(self):
+        """Update the match counter label."""
+        if not self.current_search_term:
+            self.match_counter_label.setText("")
+            return
+        
+        total = len(self.search_occurrences)
+        if total == 0:
+            self.match_counter_label.setText("No matches")
+        else:
+            current = self.current_occurrence_index + 1 if self.current_occurrence_index >= 0 else 0
+            self.match_counter_label.setText(f"{current} of {total}")
+    
+    def _jump_to_occurrence(self, index):
+        """Jump to a specific occurrence by index."""
+        if not self.search_occurrences or index < 0 or index >= len(self.search_occurrences):
+            return False
+        
+        start_position = self.search_occurrences[index]
+        cursor = self.log_output.textCursor()
+        
+        # Set cursor to the start of the match
+        cursor.setPosition(start_position)
+        
+        # Select exactly the search term length
+        cursor.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor, len(self.current_search_term))
+        
+        self.log_output.setTextCursor(cursor)
+        self.log_output.ensureCursorVisible()
+        
+        self.current_occurrence_index = index
+        self._update_match_counter()
+        return True
+    
     def handle_escape(self):
         """Smart escape handler - closes search bar first, then fullscreen."""
         if self.log_search_bar.isVisible():
@@ -398,6 +465,17 @@ class MainWindow(QWidget):
             logger.debug("Escape pressed: exited fullscreen")
         else:
             logger.debug("Escape pressed: no action taken")
+    
+    def handle_search_enter(self):
+        """Handle Enter key in search input - acts as 'Next' if search is active."""
+        search_text = self.log_search_input.text().strip()
+        
+        # If search term is the same and we have results, act as "Next"
+        if search_text == self.current_search_term and self.search_occurrences:
+            self.find_next()
+        else:
+            # New search term, do initial search
+            self.find_in_logs()
     
     def show_search_bar(self):
         """Show the search bar and focus the input field (VS Code style)."""
@@ -595,7 +673,7 @@ class MainWindow(QWidget):
         
         self.log_search_input = QLineEdit()
         self.log_search_input.setPlaceholderText("Search in logs...")
-        self.log_search_input.returnPressed.connect(self.find_in_logs)
+        self.log_search_input.returnPressed.connect(self.handle_search_enter)
         self.log_search_input.setMinimumWidth(200)
         search_bar_layout.addWidget(self.log_search_input)
         
@@ -858,82 +936,89 @@ class MainWindow(QWidget):
         search_text = self.log_search_input.text().strip()
         if not search_text:
             logger.warning("No search text provided for log search")
-            QMessageBox.warning(self, "Input Required", "Please enter text to search")
+            QMessageBox.warning(self._get_active_window(), "Input Required", "Please enter text to search")
             return
         
         logger.info(f"Searching logs for: '{search_text}' (case-insensitive)")
         
-        # Clear any previous selection
-        cursor = self.log_output.textCursor()
-        cursor.clearSelection()
-        self.log_output.setTextCursor(cursor)
+        # Store the search term
+        self.current_search_term = search_text
         
-        # Move cursor to beginning to start search from the top
-        self.log_output.moveCursor(QTextCursor.MoveOperation.Start)
+        # Find all occurrences
+        self.search_occurrences = self._find_all_occurrences(search_text)
         
-        # Find the text (case-insensitive by default - no FindCaseSensitively flag)
-        found = self.log_output.find(search_text, QTextDocument.FindFlag(0))
-        
-        if found:
-            logger.info(f"Found '{search_text}' in logs")
-            # Highlight the found text
-            cursor = self.log_output.textCursor()
-            cursor.select(QTextCursor.SelectionType.WordUnderCursor)
-            self.log_output.setTextCursor(cursor)
-            self.log_output.ensureCursorVisible()
+        if self.search_occurrences:
+            # Jump to first occurrence
+            self._jump_to_occurrence(0)
+            logger.info(f"Found {len(self.search_occurrences)} occurrence(s) of '{search_text}'")
         else:
             logger.info(f"'{search_text}' not found in logs")
-            QMessageBox.information(self, "Not Found", f"Text '{search_text}' not found in logs")
+            self.current_occurrence_index = -1
+            self._update_match_counter()
+            QMessageBox.information(self._get_active_window(), "Not Found", f"Text '{search_text}' not found in logs")
     
     def find_next(self):
         """Find the next occurrence of the search text (case-insensitive)."""
         search_text = self.log_search_input.text().strip()
         if not search_text:
             logger.warning("No search text provided for find next")
-            QMessageBox.warning(self, "Input Required", "Please enter text to search")
+            QMessageBox.warning(self._get_active_window(), "Input Required", "Please enter text to search")
             return
         
-        logger.info(f"Finding next occurrence of: '{search_text}' (case-insensitive)")
+        # If search term changed, do a fresh search
+        if search_text != self.current_search_term:
+            self.find_in_logs()
+            return
         
-        # Find next occurrence from current cursor position (case-insensitive)
-        found = self.log_output.find(search_text, QTextDocument.FindFlag(0))
+        # Refresh occurrences to include new log entries
+        self.search_occurrences = self._find_all_occurrences(search_text)
         
-        if found:
-            logger.info(f"Found next occurrence of '{search_text}'")
-            self.log_output.ensureCursorVisible()
-        else:
-            logger.info(f"No more occurrences of '{search_text}' found")
-            QMessageBox.information(self, "Not Found", f"No more occurrences of '{search_text}' found")
-            # Move cursor back to the beginning for next search
-            self.log_output.moveCursor(QTextCursor.MoveOperation.Start)
+        if not self.search_occurrences:
+            QMessageBox.information(self._get_active_window(), "Not Found", f"Text '{search_text}' not found in logs")
+            return
+        
+        # Move to next occurrence (wrap around if needed)
+        next_index = (self.current_occurrence_index + 1) % len(self.search_occurrences)
+        self._jump_to_occurrence(next_index)
+        
+        logger.info(f"Moved to occurrence {next_index + 1} of {len(self.search_occurrences)}")
     
     def find_previous(self):
         """Find the previous occurrence of the search text (case-insensitive)."""
         search_text = self.log_search_input.text().strip()
         if not search_text:
             logger.warning("No search text provided for find previous")
-            QMessageBox.warning(self, "Input Required", "Please enter text to search")
+            QMessageBox.warning(self._get_active_window(), "Input Required", "Please enter text to search")
             return
         
-        logger.info(f"Finding previous occurrence of: '{search_text}' (case-insensitive)")
+        # If search term changed, do a fresh search
+        if search_text != self.current_search_term:
+            self.find_in_logs()
+            return
         
-        # Find previous occurrence from current cursor position (backward search, case-insensitive)
-        found = self.log_output.find(search_text, QTextDocument.FindFlag.FindBackward)
+        # Refresh occurrences to include new log entries
+        self.search_occurrences = self._find_all_occurrences(search_text)
         
-        if found:
-            logger.info(f"Found previous occurrence of '{search_text}'")
-            self.log_output.ensureCursorVisible()
-        else:
-            logger.info(f"No previous occurrences of '{search_text}' found")
-            QMessageBox.information(self, "Not Found", f"No previous occurrences of '{search_text}' found")
-            # Move cursor to the end for next backward search
-            self.log_output.moveCursor(QTextCursor.MoveOperation.End)
+        if not self.search_occurrences:
+            QMessageBox.information(self._get_active_window(), "Not Found", f"Text '{search_text}' not found in logs")
+            return
+        
+        # Move to previous occurrence (wrap around if needed)
+        prev_index = (self.current_occurrence_index - 1) % len(self.search_occurrences)
+        self._jump_to_occurrence(prev_index)
+        
+        logger.info(f"Moved to occurrence {prev_index + 1} of {len(self.search_occurrences)}")
     
     def clear_log_search(self):
         """Clear the search input and remove any highlights."""
         logger.info("Clearing log search")
         self.log_search_input.clear()
         self.match_counter_label.clear()
+        
+        # Reset search state
+        self.current_search_term = ""
+        self.search_occurrences = []
+        self.current_occurrence_index = -1
         
         # Clear any text selection/highlighting
         cursor = self.log_output.textCursor()
@@ -1085,10 +1170,35 @@ class MainWindow(QWidget):
         self.console_output.moveCursor(QTextCursor.MoveOperation.End)
     
     def _append_log(self, text):
-        """Append text to log output."""
+        """Append text to log output and update search results if active."""
+        # Store current cursor position to maintain it
+        cursor = self.log_output.textCursor()
+        was_at_end = cursor.position() >= self.log_output.document().characterCount() - 10
+        
+        # Append the new text
         self.log_output.moveCursor(QTextCursor.MoveOperation.End)
         self.log_output.insertPlainText(text)
-        self.log_output.moveCursor(QTextCursor.MoveOperation.End)
+        
+        # If there's an active search, update occurrences
+        if self.current_search_term:
+            old_count = len(self.search_occurrences)
+            self.search_occurrences = self._find_all_occurrences(self.current_search_term)
+            new_count = len(self.search_occurrences)
+            
+            # Update the counter display
+            self._update_match_counter()
+            
+            # If we were at a valid occurrence, try to stay there
+            if self.current_occurrence_index >= 0 and self.current_occurrence_index < len(self.search_occurrences):
+                # Re-highlight the current occurrence to keep selection visible
+                self._jump_to_occurrence(self.current_occurrence_index)
+            
+            if new_count > old_count:
+                logger.debug(f"Search results updated: {old_count} -> {new_count} occurrences")
+        else:
+            # No active search, just move to end if we were there
+            if was_at_end:
+                self.log_output.moveCursor(QTextCursor.MoveOperation.End)
     
     # -------------------------
     # Theme Management
