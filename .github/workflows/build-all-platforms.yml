@@ -1,0 +1,260 @@
+name: Build All Platforms
+
+on:
+  workflow_dispatch:  # MANUAL TRIGGER ONLY - You click a button, no auto-runs
+    inputs:
+      version:
+        description: 'Version number (e.g., 1.0.0)'
+        required: true
+        default: '1.0.0'
+      create_release:
+        description: 'Create GitHub Release?'
+        required: true
+        type: boolean
+        default: true
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+    
+    - name: Build Windows executable
+      run: |
+        pyinstaller --name="ArgoLogViewer" `
+          --onefile `
+          --windowed `
+          --add-data="app;app" `
+          --hidden-import=PySide6 `
+          --hidden-import=paramiko `
+          --hidden-import=cryptography `
+          --icon=app/icon.ico `
+          --clean `
+          app/main.py
+    
+    - name: Rename with version
+      run: |
+        Copy-Item "dist\ArgoLogViewer.exe" "ArgoLogViewer-v${{ github.event.inputs.version }}-Windows.exe"
+    
+    - name: Generate checksum
+      run: |
+        $hash = Get-FileHash -Algorithm SHA256 "ArgoLogViewer-v${{ github.event.inputs.version }}-Windows.exe"
+        "$($hash.Hash)  ArgoLogViewer-v${{ github.event.inputs.version }}-Windows.exe" | Out-File -Encoding ASCII checksums-windows.txt
+    
+    - name: Upload Windows artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ArgoLogViewer-Windows
+        path: |
+          ArgoLogViewer-v${{ github.event.inputs.version }}-Windows.exe
+          checksums-windows.txt
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+    
+    - name: Build macOS app
+      run: |
+        pyinstaller --name="ArgoLogViewer" \
+          --windowed \
+          --onefile \
+          --add-data="app:app" \
+          --hidden-import=PySide6 \
+          --hidden-import=paramiko \
+          --hidden-import=cryptography \
+          --clean \
+          --osx-bundle-identifier=com.harshmeetsingh.argologviewer \
+          app/main.py
+    
+    - name: Create DMG
+      run: |
+        mkdir -p dist/dmg
+        cp -r dist/ArgoLogViewer.app dist/dmg/
+        ln -s /Applications dist/dmg/Applications
+        hdiutil create -volname "Argo Log Viewer" \
+          -srcfolder dist/dmg \
+          -ov -format UDZO \
+          "ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.dmg"
+    
+    - name: Zip .app
+      run: |
+        cd dist
+        zip -r ../ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.zip ArgoLogViewer.app
+        cd ..
+    
+    - name: Generate checksums
+      run: |
+        shasum -a 256 ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.dmg > checksums-macos.txt
+        shasum -a 256 ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.zip >> checksums-macos.txt
+    
+    - name: Upload macOS artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ArgoLogViewer-macOS
+        path: |
+          ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.dmg
+          ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.zip
+          checksums-macos.txt
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+    
+    - name: Build Linux binary
+      run: |
+        pyinstaller --name="ArgoLogViewer" \
+          --onefile \
+          --add-data="app:app" \
+          --hidden-import=PySide6 \
+          --hidden-import=paramiko \
+          --hidden-import=cryptography \
+          --clean \
+          app/main.py
+    
+    - name: Rename and make executable
+      run: |
+        mv dist/ArgoLogViewer ArgoLogViewer-v${{ github.event.inputs.version }}-Linux
+        chmod +x ArgoLogViewer-v${{ github.event.inputs.version }}-Linux
+    
+    - name: Generate checksum
+      run: |
+        sha256sum ArgoLogViewer-v${{ github.event.inputs.version }}-Linux > checksums-linux.txt
+    
+    - name: Upload Linux artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ArgoLogViewer-Linux
+        path: |
+          ArgoLogViewer-v${{ github.event.inputs.version }}-Linux
+          checksums-linux.txt
+
+  create-release:
+    needs: [build-windows, build-macos, build-linux]
+    runs-on: ubuntu-latest
+    if: github.event.inputs.create_release == 'true'
+    
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+    
+    - name: Combine checksums
+      run: |
+        cat ArgoLogViewer-Windows/checksums-windows.txt > CHECKSUMS.txt
+        cat ArgoLogViewer-macOS/checksums-macos.txt >> CHECKSUMS.txt
+        cat ArgoLogViewer-Linux/checksums-linux.txt >> CHECKSUMS.txt
+        echo "=== CHECKSUMS ==="
+        cat CHECKSUMS.txt
+    
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: v${{ github.event.inputs.version }}
+        name: Argo Log Viewer v${{ github.event.inputs.version }}
+        body: |
+          ## 🚀 Argo Log Viewer v${{ github.event.inputs.version }}
+          
+          Professional desktop application for viewing Argo Workflow logs via SSH.
+          
+          ### 📥 Downloads
+          
+          Choose the version for your operating system:
+          
+          | Platform | Download | Size |
+          |----------|----------|------|
+          | 🪟 **Windows** | [ArgoLogViewer-v${{ github.event.inputs.version }}-Windows.exe](../../releases/download/v${{ github.event.inputs.version }}/ArgoLogViewer-v${{ github.event.inputs.version }}-Windows.exe) | ~50 MB |
+          | 🍎 **macOS (DMG)** | [ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.dmg](../../releases/download/v${{ github.event.inputs.version }}/ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.dmg) | ~80 MB |
+          | 🍎 **macOS (ZIP)** | [ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.zip](../../releases/download/v${{ github.event.inputs.version }}/ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.zip) | ~80 MB |
+          | 🐧 **Linux** | [ArgoLogViewer-v${{ github.event.inputs.version }}-Linux](../../releases/download/v${{ github.event.inputs.version }}/ArgoLogViewer-v${{ github.event.inputs.version }}-Linux) | ~70 MB |
+          
+          ### 📋 Installation Instructions
+          
+          #### Windows
+          1. Download `ArgoLogViewer-v${{ github.event.inputs.version }}-Windows.exe`
+          2. Double-click to run
+          3. Windows Defender may warn you - click "More info" → "Run anyway"
+          
+          #### macOS (DMG - Recommended)
+          1. Download `ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.dmg`
+          2. Open the DMG file
+          3. Drag "ArgoLogViewer" to Applications folder
+          4. Right-click app → Open (first time only)
+          
+          #### macOS (ZIP)
+          1. Download and unzip
+          2. Move to Applications folder
+          3. Run: `xattr -cr /Applications/ArgoLogViewer.app`
+          4. Double-click to open
+          
+          #### Linux
+          1. Download `ArgoLogViewer-v${{ github.event.inputs.version }}-Linux`
+          2. Make executable: `chmod +x ArgoLogViewer-v${{ github.event.inputs.version }}-Linux`
+          3. Run: `./ArgoLogViewer-v${{ github.event.inputs.version }}-Linux`
+          
+          ### ✅ Verify Download (SHA-256)
+          
+          See `CHECKSUMS.txt` for SHA-256 hashes to verify your download.
+          
+          ### 🆕 What's New in v${{ github.event.inputs.version }}
+          
+          - Initial release with production-grade build system
+          - Cross-platform support (Windows, macOS, Linux)
+          - Professional installers for all platforms
+          
+          ### 🐛 Found a Bug?
+          
+          Report issues at: https://github.com/${{ github.repository }}/issues
+          
+          ### 📖 Documentation
+          
+          - [README](../../blob/main/README.md)
+          - [Build Instructions](../../blob/main/BUILD.md)
+          
+          ---
+          
+          **Built with:** Python, PySide6, PyInstaller
+          **License:** See [LICENSE.txt](../../blob/main/LICENSE.txt)
+        draft: false
+        prerelease: false
+        files: |
+          ArgoLogViewer-Windows/ArgoLogViewer-v${{ github.event.inputs.version }}-Windows.exe
+          ArgoLogViewer-macOS/ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.dmg
+          ArgoLogViewer-macOS/ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.zip
+          ArgoLogViewer-Linux/ArgoLogViewer-v${{ github.event.inputs.version }}-Linux
+          CHECKSUMS.txt
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
