@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from PySide6.QtGui import (
     QFont, QTextCursor, QPalette, QColor, QAction, 
-    QTextDocument, QShortcut, QKeySequence
+    QTextDocument, QShortcut, QKeySequence, QIcon
 )
 from app.ssh.argo_worker import ArgoWorker
 from app.ssh.connection_manager import SSHConnectionManager
@@ -20,6 +20,7 @@ from app.logging_config import get_logger
 from app.config import SecurityConfig
 import os
 import stat
+import sys
 
 logger = get_logger(__name__)
 
@@ -295,6 +296,9 @@ class MainWindow(QWidget):
         self.setWindowTitle("Argo Pod Log Viewer - Production Grade")
         self.resize(1400, 900)
         
+        # Set window icon
+        self._set_window_icon()
+        
         # Connection state
         self.ssh_manager: Optional[SSHConnectionManager] = None
         self.worker: Optional[ArgoWorker] = None
@@ -319,6 +323,41 @@ class MainWindow(QWidget):
         self._apply_theme(self.current_theme)
         
         logger.info("MainWindow initialization complete")
+    
+    def _set_window_icon(self):
+        """Set the application window icon."""
+        try:
+            # Determine the base path (different for PyInstaller executable vs script)
+            if getattr(sys, 'frozen', False):
+                # Running as compiled executable (PyInstaller)
+                base_path = sys._MEIPASS
+            else:
+                # Running as script
+                base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            
+            # Try to load icon.ico (Windows) or icon.png (cross-platform)
+            icon_paths = [
+                os.path.join(base_path, 'app', 'icon.ico'),
+                os.path.join(base_path, 'app', 'ICON.png'),
+                os.path.join(base_path, 'icon.ico'),
+                os.path.join(base_path, 'ICON.png'),
+            ]
+            
+            icon_loaded = False
+            for icon_path in icon_paths:
+                if os.path.exists(icon_path):
+                    icon = QIcon(icon_path)
+                    if not icon.isNull():
+                        self.setWindowIcon(icon)
+                        logger.info(f"Window icon loaded from: {icon_path}")
+                        icon_loaded = True
+                        break
+            
+            if not icon_loaded:
+                logger.warning("Could not load window icon - file not found")
+        
+        except Exception as e:
+            logger.error(f"Error setting window icon: {e}", exc_info=True)
     
     def _build_ui(self):
         """Build and layout all UI components."""

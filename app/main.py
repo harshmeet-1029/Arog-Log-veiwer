@@ -2,6 +2,7 @@ import sys
 import logging
 import os
 from PySide6.QtWidgets import QApplication
+from PySide6.QtGui import QIcon
 from app.ui.main_window import MainWindow
 from app.logging_config import setup_logging, get_logger
 
@@ -45,6 +46,9 @@ def main():
         app.setApplicationName("Argo Log Viewer")
         logger.info(f"Application name set to: {app.applicationName()}")
         
+        # Set application icon
+        _set_application_icon(app)
+        
         logger.debug("Creating MainWindow instance")
         window = MainWindow()
         logger.debug(f"MainWindow created with size: {window.size()}")
@@ -63,6 +67,45 @@ def main():
     except Exception as e:
         logger.critical(f"Fatal error in main(): {e}", exc_info=True)
         sys.exit(1)
+
+
+def _set_application_icon(app):
+    """
+    Set the application icon for the QApplication.
+    This affects the taskbar icon on Windows and dock icon on macOS.
+    """
+    try:
+        # Determine the base path (different for PyInstaller executable vs script)
+        if getattr(sys, 'frozen', False):
+            # Running as compiled executable (PyInstaller)
+            base_path = sys._MEIPASS
+        else:
+            # Running as script
+            base_path = os.path.dirname(os.path.abspath(__file__))
+        
+        # Try to load icon.ico (Windows) or icon.png (cross-platform)
+        icon_paths = [
+            os.path.join(base_path, 'icon.ico'),
+            os.path.join(base_path, 'ICON.png'),
+            os.path.join(base_path, 'app', 'icon.ico'),
+            os.path.join(base_path, 'app', 'ICON.png'),
+        ]
+        
+        icon_loaded = False
+        for icon_path in icon_paths:
+            if os.path.exists(icon_path):
+                icon = QIcon(icon_path)
+                if not icon.isNull():
+                    app.setWindowIcon(icon)
+                    logger.info(f"Application icon loaded from: {icon_path}")
+                    icon_loaded = True
+                    break
+        
+        if not icon_loaded:
+            logger.warning("Could not load application icon - file not found")
+    
+    except Exception as e:
+        logger.error(f"Error setting application icon: {e}", exc_info=True)
 
 
 if __name__ == "__main__":
