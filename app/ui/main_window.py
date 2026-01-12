@@ -10,7 +10,10 @@ from PySide6.QtWidgets import (
     QMenuBar, QDialog, QDialogButtonBox
 )
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont, QTextCursor, QPalette, QColor, QAction
+from PySide6.QtGui import (
+    QFont, QTextCursor, QPalette, QColor, QAction, 
+    QTextDocument, QShortcut, QKeySequence
+)
 from app.ssh.argo_worker import ArgoWorker
 from app.ssh.connection_manager import SSHConnectionManager
 from app.logging_config import get_logger
@@ -31,19 +34,22 @@ class ThemeManager:
                     color: #e0e0e0;
                 }
                 QMenuBar {
-                    background-color: #2b2b2b;
+                    background-color: #1e1e1e;
                     color: #e0e0e0;
                     border-bottom: 1px solid #3c3c3c;
-                    padding: 3px;
+                    margin-bottom: 10px;
+                    padding: 8px 10px;
+                    spacing: 5px;
                 }
                 QMenuBar::item {
                     background-color: transparent;
-                    padding: 6px 12px;
-                    margin: 2px;
+                    padding: 8px 15px;
+                    margin: 0px 2px;
                     border-radius: 4px;
                 }
                 QMenuBar::item:selected {
                     background-color: #3c3c3c;
+                    border-bottom: 1px solid #3c3c3c;
                 }
                 QMenuBar::item:pressed {
                     background-color: #4a4a4a;
@@ -131,6 +137,12 @@ class ThemeManager:
                 QLabel {
                     color: #e0e0e0;
                 }
+                /* VS Code style search bar */
+                #log_search_bar {
+                    background-color: #2b2b2b;
+                    border: 1px solid #0d47a1;
+                    border-radius: 3px;
+                }
             """,
             "console_bg": "#1e1e1e",
             "console_fg": "#d4d4d4"
@@ -146,19 +158,21 @@ class ThemeManager:
                     color: #212121;
                 }
                 QMenuBar {
-                    background-color: #f5f5f5;
+                    background-color: #ffffff;
                     color: #212121;
-                    border-bottom: 1px solid #ccc;
-                    padding: 3px;
+                    border-bottom: 1px solid #2196f3;
+                    padding: 8px 10px;
+                    spacing: 5px;
                 }
                 QMenuBar::item {
                     background-color: transparent;
-                    padding: 6px 12px;
-                    margin: 2px;
+                    padding: 8px 15px;
+                    margin: 0px 2px;
                     border-radius: 4px;
                 }
                 QMenuBar::item:selected {
                     background-color: #e0e0e0;
+                    border-bottom: 2px solid #2196f3;
                 }
                 QMenuBar::item:pressed {
                     background-color: #d0d0d0;
@@ -247,6 +261,12 @@ class ThemeManager:
                 QLabel {
                     color: #212121;
                 }
+                /* VS Code style search bar */
+                #log_search_bar {
+                    background-color: #f5f5f5;
+                    border: 1px solid #2196f3;
+                    border-radius: 3px;
+                }
             """,
             "console_bg": "#ffffff",
             "console_fg": "#212121"
@@ -279,8 +299,13 @@ class MainWindow(QWidget):
         # Theme state
         self.current_theme = "dark"
         
+        # Fullscreen state
+        self.is_fullscreen = False
+        self.original_parent = None
+        
         logger.debug("Building UI components")
         self._build_ui()
+        self._setup_shortcuts()
         self._set_initial_state()
         self._apply_theme(self.current_theme)
         
@@ -335,17 +360,87 @@ class MainWindow(QWidget):
         
         logger.info("UI layout complete")
     
+    def _setup_shortcuts(self):
+        """Set up keyboard shortcuts for the application."""
+        logger.debug("Setting up keyboard shortcuts")
+        
+        # Ctrl+F (Windows/Linux) and Cmd+F (macOS) for Find
+        find_shortcut = QShortcut(QKeySequence.StandardKey.Find, self)
+        find_shortcut.activated.connect(self.show_search_bar)
+        
+        # F3 for Find Next
+        find_next_shortcut = QShortcut(QKeySequence.StandardKey.FindNext, self)
+        find_next_shortcut.activated.connect(self.find_next)
+        
+        # Shift+F3 for Find Previous
+        find_prev_shortcut = QShortcut(QKeySequence.StandardKey.FindPrevious, self)
+        find_prev_shortcut.activated.connect(self.find_previous)
+        
+        # Escape - smart handler (closes search first, then fullscreen)
+        escape_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Escape), self)
+        escape_shortcut.activated.connect(self.handle_escape)
+        
+        # F11 for fullscreen toggle
+        fullscreen_shortcut = QShortcut(QKeySequence(Qt.Key.Key_F11), self)
+        fullscreen_shortcut.activated.connect(self.toggle_fullscreen)
+        
+        logger.info("Keyboard shortcuts configured: Ctrl+F/Cmd+F (Find), F3 (Next), Shift+F3 (Previous), Esc (Smart close), F11 (Fullscreen)")
+    
+    def handle_escape(self):
+        """Smart escape handler - closes search bar first, then fullscreen."""
+        if self.log_search_bar.isVisible():
+            # If search bar is open, close it
+            self.hide_search_bar()
+            logger.debug("Escape pressed: closed search bar")
+        elif self.is_fullscreen:
+            # If in fullscreen and search is not open, exit fullscreen
+            self.exit_fullscreen()
+            logger.debug("Escape pressed: exited fullscreen")
+        else:
+            logger.debug("Escape pressed: no action taken")
+    
+    def show_search_bar(self):
+        """Show the search bar and focus the input field (VS Code style)."""
+        if not self.log_search_bar.isVisible():
+            self.log_search_bar.setVisible(True)
+            logger.debug("Search bar shown")
+        self.log_search_input.setFocus()
+        self.log_search_input.selectAll()
+        logger.debug("Log search input focused")
+    
+    def hide_search_bar(self):
+        """Hide the search bar and clear search (VS Code style)."""
+        if self.log_search_bar.isVisible():
+            self.log_search_bar.setVisible(False)
+            self.clear_log_search()
+            self.log_output.setFocus()
+            logger.debug("Search bar hidden")
+    
+    def _focus_log_search(self):
+        """Focus the log search input field and select all text."""
+        self.log_search_input.setFocus()
+        self.log_search_input.selectAll()
+        logger.debug("Log search input focused")
+    
     def _create_menu_bar(self) -> QMenuBar:
         """Create application menu bar."""
         logger.debug("Creating menu bar")
         menu_bar = QMenuBar(self)
 
         # About action (top-level, no submenu)
-        about_action = QAction("About Argo Log Viewer", self)
+        about_action = QAction("About", self)
         about_action.setStatusTip("About Argo Log Viewer")
         about_action.triggered.connect(self._show_about_dialog)
-
         menu_bar.addAction(about_action)
+        
+        # Help menu with shortcuts
+        help_menu = menu_bar.addMenu("Help")
+        
+        shortcuts_action = QAction("Keyboard Shortcuts", self)
+        shortcuts_action.setStatusTip("View keyboard shortcuts")
+        shortcuts_action.triggered.connect(self._show_shortcuts_dialog)
+        help_menu.addAction(shortcuts_action)
+
         return menu_bar
     
     def _create_connection_controls(self) -> QGroupBox:
@@ -464,10 +559,74 @@ class MainWindow(QWidget):
         group = QGroupBox("Live Logs")
         layout = QVBoxLayout()
         
+        # Header with pod label and fullscreen button
+        header_layout = QHBoxLayout()
+        
         # Current pod label
         self.current_pod_label = QLabel("No pod selected")
         self.current_pod_label.setStyleSheet("font-weight: bold;")
-        layout.addWidget(self.current_pod_label)
+        header_layout.addWidget(self.current_pod_label)
+        
+        header_layout.addStretch()
+        
+        # Fullscreen button
+        self.fullscreen_btn = QPushButton("⛶ Fullscreen")
+        self.fullscreen_btn.setToolTip("Enter fullscreen mode (Logs only)")
+        self.fullscreen_btn.clicked.connect(self.toggle_fullscreen)
+        self.fullscreen_btn.setFixedSize(120, 28)
+        header_layout.addWidget(self.fullscreen_btn)
+        
+        layout.addLayout(header_layout)
+        
+        # Container for log output and floating search bar
+        self.log_container = QWidget()
+        log_container_layout = QVBoxLayout(self.log_container)
+        log_container_layout.setContentsMargins(0, 0, 0, 0)
+        log_container_layout.setSpacing(0)
+        
+        # Floating search bar (hidden by default, VS Code style)
+        self.log_search_bar = QWidget()
+        self.log_search_bar.setObjectName("log_search_bar")
+        search_bar_layout = QHBoxLayout(self.log_search_bar)
+        search_bar_layout.setContentsMargins(5, 5, 5, 5)
+        search_bar_layout.setSpacing(5)
+        
+        search_bar_layout.addWidget(QLabel("Find:"))
+        
+        self.log_search_input = QLineEdit()
+        self.log_search_input.setPlaceholderText("Search in logs...")
+        self.log_search_input.returnPressed.connect(self.find_in_logs)
+        self.log_search_input.setMinimumWidth(200)
+        search_bar_layout.addWidget(self.log_search_input)
+        
+        # Match counter label
+        self.match_counter_label = QLabel("")
+        self.match_counter_label.setStyleSheet("color: gray; font-size: 9pt;")
+        search_bar_layout.addWidget(self.match_counter_label)
+        
+        self.find_prev_btn = QPushButton("↑ Prev")
+        self.find_prev_btn.clicked.connect(self.find_previous)
+        self.find_prev_btn.setToolTip("Find previous (Shift+F3)")
+        self.find_prev_btn.setFixedHeight(25)
+        search_bar_layout.addWidget(self.find_prev_btn)
+        
+        self.find_next_btn = QPushButton("Next ↓")
+        self.find_next_btn.clicked.connect(self.find_next)
+        self.find_next_btn.setToolTip("Find next (F3)")
+        self.find_next_btn.setFixedHeight(25)
+        search_bar_layout.addWidget(self.find_next_btn)
+        
+        self.close_search_btn = QPushButton("Close")
+        self.close_search_btn.clicked.connect(self.hide_search_bar)
+        self.close_search_btn.setToolTip("Close (Esc)")
+        self.close_search_btn.setFixedHeight(25)
+        search_bar_layout.addWidget(self.close_search_btn)
+        
+        search_bar_layout.addStretch()
+        
+        # Hide search bar by default
+        self.log_search_bar.setVisible(False)
+        log_container_layout.addWidget(self.log_search_bar)
         
         # Log output text area
         self.log_output = QTextEdit()
@@ -478,7 +637,8 @@ class MainWindow(QWidget):
         log_font = QFont("Courier New", 9)
         self.log_output.setFont(log_font)
         
-        layout.addWidget(self.log_output)
+        log_container_layout.addWidget(self.log_output)
+        layout.addWidget(self.log_container)
         
         # Control buttons
         button_layout = QHBoxLayout()
@@ -658,6 +818,11 @@ class MainWindow(QWidget):
         
         self.log_output.clear()
         self.current_pod_label.setText(f"Viewing logs for: {pod_name}")
+        
+        # Update fullscreen label if in fullscreen mode
+        if self.is_fullscreen and hasattr(self, 'fullscreen_pod_label'):
+            self.fullscreen_pod_label.setText(f"Viewing logs for: {pod_name}")
+        
         self.console_output.append(f"\n=== Opening logs for {pod_name} ===\n")
         
         # Create and start worker
@@ -683,6 +848,193 @@ class MainWindow(QWidget):
             self.worker.wait(2000)  # Wait up to 2 seconds
             self.stop_logs_btn.setEnabled(False)
             self.current_pod_label.setText("Log stream stopped")
+            
+            # Update fullscreen label if in fullscreen mode
+            if self.is_fullscreen and hasattr(self, 'fullscreen_pod_label'):
+                self.fullscreen_pod_label.setText("Log stream stopped")
+    
+    def find_in_logs(self):
+        """Find text in the log output (case-insensitive)."""
+        search_text = self.log_search_input.text().strip()
+        if not search_text:
+            logger.warning("No search text provided for log search")
+            QMessageBox.warning(self, "Input Required", "Please enter text to search")
+            return
+        
+        logger.info(f"Searching logs for: '{search_text}' (case-insensitive)")
+        
+        # Clear any previous selection
+        cursor = self.log_output.textCursor()
+        cursor.clearSelection()
+        self.log_output.setTextCursor(cursor)
+        
+        # Move cursor to beginning to start search from the top
+        self.log_output.moveCursor(QTextCursor.MoveOperation.Start)
+        
+        # Find the text (case-insensitive by default - no FindCaseSensitively flag)
+        found = self.log_output.find(search_text, QTextDocument.FindFlag(0))
+        
+        if found:
+            logger.info(f"Found '{search_text}' in logs")
+            # Highlight the found text
+            cursor = self.log_output.textCursor()
+            cursor.select(QTextCursor.SelectionType.WordUnderCursor)
+            self.log_output.setTextCursor(cursor)
+            self.log_output.ensureCursorVisible()
+        else:
+            logger.info(f"'{search_text}' not found in logs")
+            QMessageBox.information(self, "Not Found", f"Text '{search_text}' not found in logs")
+    
+    def find_next(self):
+        """Find the next occurrence of the search text (case-insensitive)."""
+        search_text = self.log_search_input.text().strip()
+        if not search_text:
+            logger.warning("No search text provided for find next")
+            QMessageBox.warning(self, "Input Required", "Please enter text to search")
+            return
+        
+        logger.info(f"Finding next occurrence of: '{search_text}' (case-insensitive)")
+        
+        # Find next occurrence from current cursor position (case-insensitive)
+        found = self.log_output.find(search_text, QTextDocument.FindFlag(0))
+        
+        if found:
+            logger.info(f"Found next occurrence of '{search_text}'")
+            self.log_output.ensureCursorVisible()
+        else:
+            logger.info(f"No more occurrences of '{search_text}' found")
+            QMessageBox.information(self, "Not Found", f"No more occurrences of '{search_text}' found")
+            # Move cursor back to the beginning for next search
+            self.log_output.moveCursor(QTextCursor.MoveOperation.Start)
+    
+    def find_previous(self):
+        """Find the previous occurrence of the search text (case-insensitive)."""
+        search_text = self.log_search_input.text().strip()
+        if not search_text:
+            logger.warning("No search text provided for find previous")
+            QMessageBox.warning(self, "Input Required", "Please enter text to search")
+            return
+        
+        logger.info(f"Finding previous occurrence of: '{search_text}' (case-insensitive)")
+        
+        # Find previous occurrence from current cursor position (backward search, case-insensitive)
+        found = self.log_output.find(search_text, QTextDocument.FindFlag.FindBackward)
+        
+        if found:
+            logger.info(f"Found previous occurrence of '{search_text}'")
+            self.log_output.ensureCursorVisible()
+        else:
+            logger.info(f"No previous occurrences of '{search_text}' found")
+            QMessageBox.information(self, "Not Found", f"No previous occurrences of '{search_text}' found")
+            # Move cursor to the end for next backward search
+            self.log_output.moveCursor(QTextCursor.MoveOperation.End)
+    
+    def clear_log_search(self):
+        """Clear the search input and remove any highlights."""
+        logger.info("Clearing log search")
+        self.log_search_input.clear()
+        self.match_counter_label.clear()
+        
+        # Clear any text selection/highlighting
+        cursor = self.log_output.textCursor()
+        cursor.clearSelection()
+        self.log_output.setTextCursor(cursor)
+    
+    def toggle_fullscreen(self):
+        """Toggle fullscreen mode for the log viewer."""
+        if not self.is_fullscreen:
+            # Enter fullscreen
+            logger.info("Entering fullscreen mode")
+            
+            # Store original parent
+            self.original_parent = self.log_container.parent()
+            
+            # Create fullscreen window
+            self.fullscreen_window = QWidget(None, Qt.WindowType.Window)
+            self.fullscreen_window.setWindowTitle("Live Logs - Fullscreen (Press Esc or F11 to exit)")
+            
+            # Set fullscreen
+            self.fullscreen_window.showFullScreen()
+            
+            # Move log container to fullscreen window
+            fullscreen_layout = QVBoxLayout(self.fullscreen_window)
+            fullscreen_layout.setContentsMargins(10, 10, 10, 10)
+            
+            # Add header with pod name and exit button
+            header_layout = QHBoxLayout()
+            
+            fullscreen_pod_label = QLabel()
+            fullscreen_pod_label.setText(self.current_pod_label.text())
+            fullscreen_pod_label.setStyleSheet("font-weight: bold; font-size: 12pt;")
+            header_layout.addWidget(fullscreen_pod_label)
+            self.fullscreen_pod_label = fullscreen_pod_label
+            
+            header_layout.addStretch()
+            
+            exit_fullscreen_btn = QPushButton("✕ Exit Fullscreen")
+            exit_fullscreen_btn.clicked.connect(self.toggle_fullscreen)
+            exit_fullscreen_btn.setToolTip("Exit fullscreen (Esc or F11)")
+            exit_fullscreen_btn.setFixedSize(140, 30)
+            header_layout.addWidget(exit_fullscreen_btn)
+            
+            fullscreen_layout.addLayout(header_layout)
+            
+            # Reparent log container to fullscreen window
+            self.log_container.setParent(self.fullscreen_window)
+            fullscreen_layout.addWidget(self.log_container)
+            
+            # Add shortcuts for fullscreen window
+            escape_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Escape), self.fullscreen_window)
+            escape_shortcut.activated.connect(self.handle_escape)
+            
+            f11_shortcut = QShortcut(QKeySequence(Qt.Key.Key_F11), self.fullscreen_window)
+            f11_shortcut.activated.connect(self.toggle_fullscreen)
+            
+            # Search shortcuts in fullscreen
+            find_shortcut = QShortcut(QKeySequence.StandardKey.Find, self.fullscreen_window)
+            find_shortcut.activated.connect(self.show_search_bar)
+            
+            find_next_shortcut = QShortcut(QKeySequence.StandardKey.FindNext, self.fullscreen_window)
+            find_next_shortcut.activated.connect(self.find_next)
+            
+            find_prev_shortcut = QShortcut(QKeySequence.StandardKey.FindPrevious, self.fullscreen_window)
+            find_prev_shortcut.activated.connect(self.find_previous)
+            
+            # Apply theme to fullscreen window
+            theme = ThemeManager.get_theme(self.current_theme)
+            self.fullscreen_window.setStyleSheet(theme["stylesheet"])
+            
+            self.is_fullscreen = True
+            self.fullscreen_btn.setText("⛶ Exit Fullscreen")
+            
+        else:
+            # Exit fullscreen
+            self.exit_fullscreen()
+    
+    def exit_fullscreen(self):
+        """Exit fullscreen mode."""
+        if self.is_fullscreen and hasattr(self, 'fullscreen_window'):
+            logger.info("Exiting fullscreen mode")
+            
+            # Close search bar if open
+            self.hide_search_bar()
+            
+            # Move log container back to original parent
+            if self.original_parent:
+                # Find the log section group box
+                log_section = self.original_parent
+                log_section_layout = log_section.layout()
+                
+                # Re-add log container to original position (after header, before buttons)
+                self.log_container.setParent(log_section)
+                log_section_layout.insertWidget(1, self.log_container)
+            
+            # Close and delete fullscreen window
+            self.fullscreen_window.close()
+            self.fullscreen_window.deleteLater()
+            
+            self.is_fullscreen = False
+            self.fullscreen_btn.setText("⛶ Fullscreen")
     
     # -------------------------
     # Signal Handlers
@@ -874,6 +1226,143 @@ class MainWindow(QWidget):
         
         dialog.exec()
     
+    def _show_shortcuts_dialog(self):
+        """Show the Keyboard Shortcuts dialog."""
+        logger.info("Showing Keyboard Shortcuts dialog")
+        
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Keyboard Shortcuts")
+        dialog.setMinimumWidth(500)
+        dialog.setMinimumHeight(400)
+        
+        layout = QVBoxLayout()
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Title
+        title_label = QLabel("Keyboard Shortcuts")
+        title_font = QFont()
+        title_font.setPointSize(14)
+        title_font.setBold(True)
+        title_label.setFont(title_font)
+        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(title_label)
+        
+        # Separator
+        layout.addSpacing(10)
+        
+        # Shortcuts content
+        shortcuts_text = QTextEdit()
+        shortcuts_text.setReadOnly(True)
+        shortcuts_text.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+        
+        # Determine platform-specific key
+        import platform
+        if platform.system() == "Darwin":
+            ctrl_key = "Cmd"
+        else:
+            ctrl_key = "Ctrl"
+        
+        shortcuts_content = f"""
+<h3>🔍 Search in Logs</h3>
+<table cellpadding="5" cellspacing="0" style="width: 100%;">
+    <tr>
+        <td style="width: 40%;"><b>{ctrl_key}+F</b></td>
+        <td>Show/hide search bar</td>
+    </tr>
+    <tr>
+        <td><b>Enter</b></td>
+        <td>Find text (when in search field)</td>
+    </tr>
+    <tr>
+        <td><b>F3</b></td>
+        <td>Find next occurrence</td>
+    </tr>
+    <tr>
+        <td><b>Shift+F3</b></td>
+        <td>Find previous occurrence</td>
+    </tr>
+    <tr>
+        <td><b>Escape</b></td>
+        <td>Close search bar</td>
+    </tr>
+</table>
+
+<h3>🖥️ View Controls</h3>
+<table cellpadding="5" cellspacing="0" style="width: 100%;">
+    <tr>
+        <td style="width: 40%;"><b>F11</b></td>
+        <td>Toggle fullscreen mode for logs</td>
+    </tr>
+    <tr>
+        <td><b>Escape</b></td>
+        <td>Exit fullscreen mode</td>
+    </tr>
+</table>
+
+<h3>📋 General Actions</h3>
+<table cellpadding="5" cellspacing="0" style="width: 100%;">
+    <tr>
+        <td style="width: 40%;"><b>Double-click</b></td>
+        <td>Open logs for selected pod</td>
+    </tr>
+    <tr>
+        <td><b>Enter</b></td>
+        <td>Execute search/action in focused field</td>
+    </tr>
+</table>
+
+<h3>💡 Tips</h3>
+<ul>
+    <li>Search is <b>case-insensitive</b> by default</li>
+    <li>Search bar appears on demand (Ctrl+F) - VS Code style</li>
+    <li>Use fullscreen (F11) to maximize log viewing area</li>
+    <li>All shortcuts work in both normal and fullscreen modes</li>
+    <li>Search wraps around from end to beginning</li>
+</ul>
+        """
+        
+        shortcuts_text.setHtml(shortcuts_content)
+        layout.addWidget(shortcuts_text)
+        
+        # OK button
+        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
+        button_box.accepted.connect(dialog.accept)
+        layout.addWidget(button_box)
+        
+        dialog.setLayout(layout)
+        
+        # Apply current theme to dialog
+        if self.current_theme == "dark":
+            dialog.setStyleSheet("""
+                QDialog {
+                    background-color: #2b2b2b;
+                    color: #e0e0e0;
+                }
+                QTextEdit {
+                    background-color: #1e1e1e;
+                    color: #e0e0e0;
+                    border: 1px solid #3c3c3c;
+                }
+                QLabel a {
+                    color: #4a9eff;
+                }
+            """)
+        else:
+            dialog.setStyleSheet("""
+                QDialog {
+                    background-color: #ffffff;
+                    color: #212121;
+                }
+                QTextEdit {
+                    background-color: #fafafa;
+                    color: #212121;
+                    border: 1px solid #ccc;
+                }
+            """)
+        
+        dialog.exec()
+    
     # -------------------------
     # Window Close Event
     # -------------------------
@@ -881,6 +1370,10 @@ class MainWindow(QWidget):
     def closeEvent(self, event):
         """Handle window close event - cleanup connections."""
         logger.info("Window close event triggered")
+        
+        # Exit fullscreen if active
+        if self.is_fullscreen:
+            self.exit_fullscreen()
         
         # Stop any running worker
         if self.worker and self.worker.isRunning():
