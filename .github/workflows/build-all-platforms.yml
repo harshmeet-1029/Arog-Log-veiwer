@@ -65,7 +65,7 @@ jobs:
 
   build-macos:
     # Build universal2 binary (Intel + Apple Silicon) using Python.org's universal2 Python
-    runs-on: macos-13
+    runs-on: macos-latest
     steps:
     - uses: actions/checkout@v4
     
@@ -110,8 +110,10 @@ jobs:
       run: |
         # Use Python.org Python
         export PATH="/Library/Frameworks/Python.framework/Versions/3.11/bin:$PATH"
+        export MACOSX_DEPLOYMENT_TARGET=11.0
         
         echo "🔨 Building universal2 app with PyInstaller..."
+        echo "📋 Deployment target: macOS 11.0 Big Sur and later"
         python3.11 -m PyInstaller --name="ArgoLogViewer" \
           --windowed \
           --onefile \
@@ -122,6 +124,7 @@ jobs:
           --clean \
           --osx-bundle-identifier=com.harshmeetsingh.argologviewer \
           --target-arch universal2 \
+          --codesign-identity - \
           app/main.py
     
     - name: Verify universal2 binary
