@@ -18,7 +18,8 @@ permissions:
 
 jobs:
   build-macos:
-    runs-on: macos-latest  # FREE macOS runner from GitHub
+    # Build a universal2 app (Intel + Apple Silicon).
+    runs-on: macos-14
     
     steps:
     - name: Checkout code
@@ -27,7 +28,8 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.10'
+        # Use a universal2 Python to enable universal2 builds with PyInstaller.
+        python-version: '3.11'
     
     - name: Install dependencies
       run: |
@@ -46,7 +48,43 @@ jobs:
           --hidden-import=cryptography \
           --clean \
           --osx-bundle-identifier=com.harshmeetsingh.argologviewer \
+          --target-arch universal2 \
           app/main.py
+    
+    - name: Verify universal2 binary
+      run: |
+        echo "🔍 Verifying universal2 build..."
+        echo ""
+        
+        # Find the main executable inside the .app bundle
+        EXECUTABLE="dist/ArgoLogViewer.app/Contents/MacOS/ArgoLogViewer"
+        
+        if [ ! -f "$EXECUTABLE" ]; then
+          echo "❌ ERROR: Executable not found at $EXECUTABLE"
+          exit 1
+        fi
+        
+        echo "📦 Checking architectures in executable:"
+        lipo -info "$EXECUTABLE"
+        echo ""
+        
+        # Verify it contains both architectures
+        if lipo -info "$EXECUTABLE" | grep -q "x86_64" && lipo -info "$EXECUTABLE" | grep -q "arm64"; then
+          echo "✅ SUCCESS: Binary contains both x86_64 (Intel) and arm64 (Apple Silicon)"
+        else
+          echo "❌ ERROR: Binary is not universal2!"
+          echo "Expected: x86_64 and arm64"
+          echo "Got:"
+          lipo -info "$EXECUTABLE"
+          exit 1
+        fi
+        
+        echo ""
+        echo "📋 App bundle info:"
+        ls -lh "$EXECUTABLE"
+        echo ""
+        echo "📁 App bundle structure:"
+        ls -la dist/ArgoLogViewer.app/Contents/
     
     - name: Create DMG installer
       run: |
@@ -124,21 +162,62 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     
-    - name: Show build info
+    - name: Final verification and build info
       run: |
-        echo "✅ Build complete!"
-        echo "Version: v${{ github.event.inputs.version }}"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "✅ BUILD COMPLETE - UNIVERSAL2 APP"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        echo "📦 Version: v${{ github.event.inputs.version }}"
+        echo ""
+        
+        # Verify the final DMG contains a universal2 app
+        echo "🔍 Final verification of DMG contents..."
+        hdiutil attach "ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.dmg" -mountpoint /tmp/verify_dmg
+        
+        DMG_EXECUTABLE="/tmp/verify_dmg/ArgoLogViewer.app/Contents/MacOS/ArgoLogViewer"
+        if [ -f "$DMG_EXECUTABLE" ]; then
+          echo "✅ DMG mounted successfully"
+          echo "📋 Architecture check:"
+          lipo -info "$DMG_EXECUTABLE"
+          
+          if lipo -info "$DMG_EXECUTABLE" | grep -q "x86_64" && lipo -info "$DMG_EXECUTABLE" | grep -q "arm64"; then
+            echo "✅ DMG contains universal2 binary"
+          else
+            echo "❌ WARNING: DMG does not contain universal2 binary!"
+          fi
+        else
+          echo "⚠️  Could not verify DMG contents"
+        fi
+        
+        hdiutil detach /tmp/verify_dmg || true
+        echo ""
+        
+        # File sizes
         if [ -f "ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.dmg" ]; then
-          echo "DMG size: $(du -sh ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.dmg | cut -f1)"
+          echo "💾 DMG size: $(du -sh ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.dmg | cut -f1)"
         fi
         if [ -f "ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.zip" ]; then
-          echo "ZIP size: $(du -sh ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.zip | cut -f1)"
+          echo "💾 ZIP size: $(du -sh ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.zip | cut -f1)"
         fi
         echo ""
+        
+        # Release info
         if [ "${{ github.event.inputs.create_release }}" == "true" ]; then
-          echo "🎉 Release created at:"
-          echo "https://github.com/${{ github.repository }}/releases/tag/v${{ github.event.inputs.version }}"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "🎉 RELEASE PUBLISHED"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo ""
-          echo "Users can download from:"
-          echo "https://github.com/${{ github.repository }}/releases/latest"
+          echo "🔗 Release URL:"
+          echo "   https://github.com/${{ github.repository }}/releases/tag/v${{ github.event.inputs.version }}"
+          echo ""
+          echo "📥 Download URL:"
+          echo "   https://github.com/${{ github.repository }}/releases/latest"
+          echo ""
+          echo "✅ Compatible with:"
+          echo "   - Intel Macs (x86_64)"
+          echo "   - Apple Silicon Macs (arm64)"
+          echo ""
         fi
+        
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

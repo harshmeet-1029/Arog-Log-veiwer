@@ -64,14 +64,16 @@ jobs:
           checksums-windows.txt
 
   build-macos:
-    runs-on: macos-latest
+    # Build a universal2 app (Intel + Apple Silicon).
+    runs-on: macos-14
     steps:
     - uses: actions/checkout@v4
     
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.10'
+        # Use a universal2 Python to enable universal2 builds with PyInstaller.
+        python-version: '3.11'
     
     - name: Install dependencies
       run: |
@@ -90,7 +92,36 @@ jobs:
           --hidden-import=cryptography \
           --clean \
           --osx-bundle-identifier=com.harshmeetsingh.argologviewer \
+          --target-arch universal2 \
           app/main.py
+    
+    - name: Verify universal2 binary
+      run: |
+        echo "🔍 Verifying universal2 build..."
+        echo ""
+        
+        # Find the main executable inside the .app bundle
+        EXECUTABLE="dist/ArgoLogViewer.app/Contents/MacOS/ArgoLogViewer"
+        
+        if [ ! -f "$EXECUTABLE" ]; then
+          echo "❌ ERROR: Executable not found at $EXECUTABLE"
+          exit 1
+        fi
+        
+        echo "📦 Checking architectures in executable:"
+        lipo -info "$EXECUTABLE"
+        echo ""
+        
+        # Verify it contains both architectures
+        if lipo -info "$EXECUTABLE" | grep -q "x86_64" && lipo -info "$EXECUTABLE" | grep -q "arm64"; then
+          echo "✅ SUCCESS: Binary contains both x86_64 (Intel) and arm64 (Apple Silicon)"
+        else
+          echo "❌ ERROR: Binary is not universal2!"
+          echo "Expected: x86_64 and arm64"
+          echo "Got:"
+          lipo -info "$EXECUTABLE"
+          exit 1
+        fi
     
     - name: Create DMG
       run: |
@@ -112,6 +143,39 @@ jobs:
       run: |
         shasum -a 256 ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.dmg > checksums-macos.txt
         shasum -a 256 ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.zip >> checksums-macos.txt
+    
+    - name: Final verification
+      run: |
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "✅ macOS BUILD COMPLETE - UNIVERSAL2"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        
+        # Verify the final DMG contains a universal2 app
+        echo "🔍 Final verification of DMG contents..."
+        hdiutil attach "ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.dmg" -mountpoint /tmp/verify_dmg
+        
+        DMG_EXECUTABLE="/tmp/verify_dmg/ArgoLogViewer.app/Contents/MacOS/ArgoLogViewer"
+        if [ -f "$DMG_EXECUTABLE" ]; then
+          echo "✅ DMG mounted successfully"
+          echo "📋 Architecture check:"
+          lipo -info "$DMG_EXECUTABLE"
+          
+          if lipo -info "$DMG_EXECUTABLE" | grep -q "x86_64" && lipo -info "$DMG_EXECUTABLE" | grep -q "arm64"; then
+            echo "✅ DMG contains universal2 binary"
+          else
+            echo "❌ ERROR: DMG does not contain universal2 binary!"
+            exit 1
+          fi
+        else
+          echo "❌ ERROR: Could not verify DMG contents"
+          exit 1
+        fi
+        
+        hdiutil detach /tmp/verify_dmg || true
+        echo ""
+        echo "✅ Compatible with both Intel and Apple Silicon Macs"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     
     - name: Upload macOS artifacts
       uses: actions/upload-artifact@v4
@@ -200,9 +264,11 @@ jobs:
           | Platform | Download | Size |
           |----------|----------|------|
           | 🪟 **Windows** | [ArgoLogViewer-v${{ github.event.inputs.version }}-Windows.exe](../../releases/download/v${{ github.event.inputs.version }}/ArgoLogViewer-v${{ github.event.inputs.version }}-Windows.exe) | ~50 MB |
-          | 🍎 **macOS (DMG)** | [ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.dmg](../../releases/download/v${{ github.event.inputs.version }}/ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.dmg) | ~80 MB |
-          | 🍎 **macOS (ZIP)** | [ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.zip](../../releases/download/v${{ github.event.inputs.version }}/ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.zip) | ~80 MB |
+          | 🍎 **macOS (DMG)** - Universal | [ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.dmg](../../releases/download/v${{ github.event.inputs.version }}/ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.dmg) | ~80 MB |
+          | 🍎 **macOS (ZIP)** - Universal | [ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.zip](../../releases/download/v${{ github.event.inputs.version }}/ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.zip) | ~80 MB |
           | 🐧 **Linux** | [ArgoLogViewer-v${{ github.event.inputs.version }}-Linux](../../releases/download/v${{ github.event.inputs.version }}/ArgoLogViewer-v${{ github.event.inputs.version }}-Linux) | ~70 MB |
+          
+          > 🍎 **macOS Note:** Both DMG and ZIP are universal2 binaries that work on Intel and Apple Silicon Macs.
           
           ### 📋 Installation Instructions
           
