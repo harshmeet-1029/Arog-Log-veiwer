@@ -18,28 +18,57 @@ permissions:
 
 jobs:
   build-macos:
-    # Build a universal2 app (Intel + Apple Silicon).
-    runs-on: macos-14
+    # Build universal2 binary (Intel + Apple Silicon) using Python.org's universal2 Python
+    runs-on: macos-13
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
     
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        # Use a universal2 Python to enable universal2 builds with PyInstaller.
-        python-version: '3.11'
+    - name: Install Python.org universal2 Python
+      run: |
+        echo "📦 Downloading Python.org universal2 Python installer..."
+        curl -o python-installer.pkg https://www.python.org/ftp/python/3.11.7/python-3.11.7-macos11.pkg
+        
+        echo "🔧 Installing Python..."
+        sudo installer -pkg python-installer.pkg -target /
+        
+        # Use the Python.org Python (not system Python)
+        export PATH="/Library/Frameworks/Python.framework/Versions/3.11/bin:$PATH"
+        
+        echo "✅ Python installed:"
+        python3.11 --version
+        
+        # Verify it's universal2
+        echo "🔍 Verifying Python is universal2..."
+        lipo -info /Library/Frameworks/Python.framework/Versions/3.11/Python
+        
+        if lipo -info /Library/Frameworks/Python.framework/Versions/3.11/Python | grep -q "x86_64" && lipo -info /Library/Frameworks/Python.framework/Versions/3.11/Python | grep -q "arm64"; then
+          echo "✅ Python is universal2 (x86_64 + arm64)"
+        else
+          echo "❌ ERROR: Python is not universal2!"
+          exit 1
+        fi
     
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pyinstaller
+        # Use Python.org Python
+        export PATH="/Library/Frameworks/Python.framework/Versions/3.11/bin:$PATH"
+        
+        echo "📦 Installing pip packages..."
+        python3.11 -m pip install --upgrade pip
+        python3.11 -m pip install -r requirements.txt
+        python3.11 -m pip install pyinstaller
+        
+        echo "✅ Dependencies installed"
     
-    - name: Build macOS app
+    - name: Build macOS universal2 app
       run: |
-        pyinstaller --name="ArgoLogViewer" \
+        # Use Python.org Python
+        export PATH="/Library/Frameworks/Python.framework/Versions/3.11/bin:$PATH"
+        
+        echo "🔨 Building universal2 app with PyInstaller..."
+        python3.11 -m PyInstaller --name="ArgoLogViewer" \
           --windowed \
           --onefile \
           --add-data="app:app" \
@@ -53,7 +82,9 @@ jobs:
     
     - name: Verify universal2 binary
       run: |
-        echo "🔍 Verifying universal2 build..."
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "🔍 VERIFYING UNIVERSAL2 BINARY"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo ""
         
         # Find the main executable inside the .app bundle
@@ -66,11 +97,17 @@ jobs:
         
         echo "📦 Checking architectures in executable:"
         lipo -info "$EXECUTABLE"
+        file "$EXECUTABLE"
         echo ""
         
         # Verify it contains both architectures
         if lipo -info "$EXECUTABLE" | grep -q "x86_64" && lipo -info "$EXECUTABLE" | grep -q "arm64"; then
-          echo "✅ SUCCESS: Binary contains both x86_64 (Intel) and arm64 (Apple Silicon)"
+          echo "✅ SUCCESS: Binary is universal2!"
+          echo "   ✓ Contains x86_64 (Intel)"
+          echo "   ✓ Contains arm64 (Apple Silicon)"
+          echo ""
+          echo "✅ Will run natively on both Intel and Apple Silicon Macs"
+          echo "✅ NO Rosetta 2 required!"
         else
           echo "❌ ERROR: Binary is not universal2!"
           echo "Expected: x86_64 and arm64"
@@ -80,11 +117,12 @@ jobs:
         fi
         
         echo ""
-        echo "📋 App bundle info:"
+        echo "📋 Executable info:"
         ls -lh "$EXECUTABLE"
         echo ""
-        echo "📁 App bundle structure:"
+        echo "📁 App bundle contents:"
         ls -la dist/ArgoLogViewer.app/Contents/
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     
     - name: Create DMG installer
       run: |
@@ -165,13 +203,13 @@ jobs:
     - name: Final verification and build info
       run: |
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "✅ BUILD COMPLETE - UNIVERSAL2 APP"
+        echo "✅ BUILD COMPLETE - UNIVERSAL2 BINARY"
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo ""
         echo "📦 Version: v${{ github.event.inputs.version }}"
         echo ""
         
-        # Verify the final DMG contains a universal2 app
+        # Verify the final DMG contains universal2
         echo "🔍 Final verification of DMG contents..."
         hdiutil attach "ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.dmg" -mountpoint /tmp/verify_dmg
         
@@ -182,12 +220,15 @@ jobs:
           lipo -info "$DMG_EXECUTABLE"
           
           if lipo -info "$DMG_EXECUTABLE" | grep -q "x86_64" && lipo -info "$DMG_EXECUTABLE" | grep -q "arm64"; then
-            echo "✅ DMG contains universal2 binary"
+            echo "✅ DMG contains universal2 binary (x86_64 + arm64)"
+            echo "✅ ONE-CLICK INSTALL - NO ROSETTA 2 REQUIRED!"
           else
-            echo "❌ WARNING: DMG does not contain universal2 binary!"
+            echo "❌ ERROR: DMG does not contain universal2 binary!"
+            exit 1
           fi
         else
-          echo "⚠️  Could not verify DMG contents"
+          echo "❌ ERROR: Could not verify DMG contents"
+          exit 1
         fi
         
         hdiutil detach /tmp/verify_dmg || true
@@ -214,9 +255,10 @@ jobs:
           echo "📥 Download URL:"
           echo "   https://github.com/${{ github.repository }}/releases/latest"
           echo ""
-          echo "✅ Compatible with:"
-          echo "   - Intel Macs (x86_64)"
-          echo "   - Apple Silicon Macs (arm64)"
+          echo "✅ TRUE UNIVERSAL2 BINARY:"
+          echo "   ✓ Intel Macs (x86_64) - Native performance"
+          echo "   ✓ Apple Silicon Macs (arm64) - Native performance"
+          echo "   ✓ ONE-CLICK install, NO Rosetta 2 prompt"
           echo ""
         fi
         

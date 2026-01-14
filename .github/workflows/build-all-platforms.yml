@@ -64,26 +64,55 @@ jobs:
           checksums-windows.txt
 
   build-macos:
-    # Build a universal2 app (Intel + Apple Silicon).
-    runs-on: macos-14
+    # Build universal2 binary (Intel + Apple Silicon) using Python.org's universal2 Python
+    runs-on: macos-13
     steps:
     - uses: actions/checkout@v4
     
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        # Use a universal2 Python to enable universal2 builds with PyInstaller.
-        python-version: '3.11'
+    - name: Install Python.org universal2 Python
+      run: |
+        echo "📦 Downloading Python.org universal2 Python installer..."
+        curl -o python-installer.pkg https://www.python.org/ftp/python/3.11.7/python-3.11.7-macos11.pkg
+        
+        echo "🔧 Installing Python..."
+        sudo installer -pkg python-installer.pkg -target /
+        
+        # Use the Python.org Python (not system Python)
+        export PATH="/Library/Frameworks/Python.framework/Versions/3.11/bin:$PATH"
+        
+        echo "✅ Python installed:"
+        python3.11 --version
+        
+        # Verify it's universal2
+        echo "🔍 Verifying Python is universal2..."
+        lipo -info /Library/Frameworks/Python.framework/Versions/3.11/Python
+        
+        if lipo -info /Library/Frameworks/Python.framework/Versions/3.11/Python | grep -q "x86_64" && lipo -info /Library/Frameworks/Python.framework/Versions/3.11/Python | grep -q "arm64"; then
+          echo "✅ Python is universal2 (x86_64 + arm64)"
+        else
+          echo "❌ ERROR: Python is not universal2!"
+          exit 1
+        fi
     
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pyinstaller
+        # Use Python.org Python
+        export PATH="/Library/Frameworks/Python.framework/Versions/3.11/bin:$PATH"
+        
+        echo "📦 Installing pip packages..."
+        python3.11 -m pip install --upgrade pip
+        python3.11 -m pip install -r requirements.txt
+        python3.11 -m pip install pyinstaller
+        
+        echo "✅ Dependencies installed"
     
-    - name: Build macOS app
+    - name: Build macOS universal2 app
       run: |
-        pyinstaller --name="ArgoLogViewer" \
+        # Use Python.org Python
+        export PATH="/Library/Frameworks/Python.framework/Versions/3.11/bin:$PATH"
+        
+        echo "🔨 Building universal2 app with PyInstaller..."
+        python3.11 -m PyInstaller --name="ArgoLogViewer" \
           --windowed \
           --onefile \
           --add-data="app:app" \
@@ -108,18 +137,18 @@ jobs:
           exit 1
         fi
         
-        echo "📦 Checking architectures in executable:"
+        echo "📦 Checking architectures:"
         lipo -info "$EXECUTABLE"
         echo ""
         
         # Verify it contains both architectures
         if lipo -info "$EXECUTABLE" | grep -q "x86_64" && lipo -info "$EXECUTABLE" | grep -q "arm64"; then
-          echo "✅ SUCCESS: Binary contains both x86_64 (Intel) and arm64 (Apple Silicon)"
+          echo "✅ SUCCESS: Binary is universal2!"
+          echo "   ✓ Contains x86_64 (Intel)"
+          echo "   ✓ Contains arm64 (Apple Silicon)"
+          echo "✅ NO Rosetta 2 required!"
         else
           echo "❌ ERROR: Binary is not universal2!"
-          echo "Expected: x86_64 and arm64"
-          echo "Got:"
-          lipo -info "$EXECUTABLE"
           exit 1
         fi
     
@@ -151,7 +180,7 @@ jobs:
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo ""
         
-        # Verify the final DMG contains a universal2 app
+        # Verify the final DMG
         echo "🔍 Final verification of DMG contents..."
         hdiutil attach "ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.dmg" -mountpoint /tmp/verify_dmg
         
@@ -162,7 +191,8 @@ jobs:
           lipo -info "$DMG_EXECUTABLE"
           
           if lipo -info "$DMG_EXECUTABLE" | grep -q "x86_64" && lipo -info "$DMG_EXECUTABLE" | grep -q "arm64"; then
-            echo "✅ DMG contains universal2 binary"
+            echo "✅ DMG contains universal2 binary (x86_64 + arm64)"
+            echo "✅ ONE-CLICK INSTALL - NO ROSETTA 2 REQUIRED!"
           else
             echo "❌ ERROR: DMG does not contain universal2 binary!"
             exit 1
@@ -174,7 +204,7 @@ jobs:
         
         hdiutil detach /tmp/verify_dmg || true
         echo ""
-        echo "✅ Compatible with both Intel and Apple Silicon Macs"
+        echo "✅ Native support for Intel and Apple Silicon Macs"
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     
     - name: Upload macOS artifacts
@@ -264,11 +294,11 @@ jobs:
           | Platform | Download | Size |
           |----------|----------|------|
           | 🪟 **Windows** | [ArgoLogViewer-v${{ github.event.inputs.version }}-Windows.exe](../../releases/download/v${{ github.event.inputs.version }}/ArgoLogViewer-v${{ github.event.inputs.version }}-Windows.exe) | ~50 MB |
-          | 🍎 **macOS (DMG)** - Universal | [ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.dmg](../../releases/download/v${{ github.event.inputs.version }}/ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.dmg) | ~80 MB |
-          | 🍎 **macOS (ZIP)** - Universal | [ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.zip](../../releases/download/v${{ github.event.inputs.version }}/ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.zip) | ~80 MB |
+          | 🍎 **macOS (DMG)** - Universal2 | [ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.dmg](../../releases/download/v${{ github.event.inputs.version }}/ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.dmg) | ~80 MB |
+          | 🍎 **macOS (ZIP)** - Universal2 | [ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.zip](../../releases/download/v${{ github.event.inputs.version }}/ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.zip) | ~80 MB |
           | 🐧 **Linux** | [ArgoLogViewer-v${{ github.event.inputs.version }}-Linux](../../releases/download/v${{ github.event.inputs.version }}/ArgoLogViewer-v${{ github.event.inputs.version }}-Linux) | ~70 MB |
           
-          > 🍎 **macOS Note:** Both DMG and ZIP are universal2 binaries that work on Intel and Apple Silicon Macs.
+          > 🍎 **macOS Note:** Universal2 binary with native support for both Intel (x86_64) and Apple Silicon (arm64). **One-click install, no Rosetta 2 required!**
           
           ### 📋 Installation Instructions
           
