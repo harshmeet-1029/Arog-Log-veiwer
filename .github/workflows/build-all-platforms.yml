@@ -63,58 +63,32 @@ jobs:
           ArgoLogViewer-v${{ github.event.inputs.version }}-Windows.exe
           checksums-windows.txt
 
-  build-macos:
-    # Build universal2 binary (Intel + Apple Silicon) using Python.org's universal2 Python
-    runs-on: macos-latest
+  build-macos-intel:
+    # Build Intel-only (x86_64) binary
+    runs-on: macos-15-large  # Intel runner
     steps:
     - uses: actions/checkout@v4
     
-    - name: Install Python.org universal2 Python
-      run: |
-        echo "📦 Downloading Python.org universal2 Python installer..."
-        curl -o python-installer.pkg https://www.python.org/ftp/python/3.11.7/python-3.11.7-macos11.pkg
-        
-        echo "🔧 Installing Python..."
-        sudo installer -pkg python-installer.pkg -target /
-        
-        # Use the Python.org Python (not system Python)
-        export PATH="/Library/Frameworks/Python.framework/Versions/3.11/bin:$PATH"
-        
-        echo "✅ Python installed:"
-        python3.11 --version
-        
-        # Verify it's universal2
-        echo "🔍 Verifying Python is universal2..."
-        lipo -info /Library/Frameworks/Python.framework/Versions/3.11/Python
-        
-        if lipo -info /Library/Frameworks/Python.framework/Versions/3.11/Python | grep -q "x86_64" && lipo -info /Library/Frameworks/Python.framework/Versions/3.11/Python | grep -q "arm64"; then
-          echo "✅ Python is universal2 (x86_64 + arm64)"
-        else
-          echo "❌ ERROR: Python is not universal2!"
-          exit 1
-        fi
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
     
     - name: Install dependencies
       run: |
-        # Use Python.org Python
-        export PATH="/Library/Frameworks/Python.framework/Versions/3.11/bin:$PATH"
-        
-        echo "📦 Installing pip packages..."
-        python3.11 -m pip install --upgrade pip
-        python3.11 -m pip install -r requirements.txt
-        python3.11 -m pip install pyinstaller
-        
+        echo "📦 Installing pip packages for Intel build..."
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
         echo "✅ Dependencies installed"
     
-    - name: Build macOS universal2 app
+    - name: Build macOS Intel app
       run: |
-        # Use Python.org Python
-        export PATH="/Library/Frameworks/Python.framework/Versions/3.11/bin:$PATH"
         export MACOSX_DEPLOYMENT_TARGET=11.0
         
-        echo "🔨 Building universal2 app with PyInstaller..."
+        echo "🔨 Building Intel (x86_64) app with PyInstaller..."
         echo "📋 Deployment target: macOS 11.0 Big Sur and later"
-        python3.11 -m PyInstaller --name="ArgoLogViewer" \
+        python -m PyInstaller --name="ArgoLogViewer" \
           --windowed \
           --onefile \
           --add-data="app:app" \
@@ -123,101 +97,150 @@ jobs:
           --hidden-import=cryptography \
           --clean \
           --osx-bundle-identifier=com.harshmeetsingh.argologviewer \
-          --target-arch universal2 \
+          --target-arch x86_64 \
           --codesign-identity - \
           app/main.py
     
-    - name: Verify universal2 binary
+    - name: Verify Intel binary
       run: |
-        echo "🔍 Verifying universal2 build..."
-        echo ""
-        
-        # Find the main executable inside the .app bundle
+        echo "🔍 Verifying Intel build..."
         EXECUTABLE="dist/ArgoLogViewer.app/Contents/MacOS/ArgoLogViewer"
         
         if [ ! -f "$EXECUTABLE" ]; then
-          echo "❌ ERROR: Executable not found at $EXECUTABLE"
+          echo "❌ ERROR: Executable not found"
           exit 1
         fi
         
-        echo "📦 Checking architectures:"
         lipo -info "$EXECUTABLE"
-        echo ""
         
-        # Verify it contains both architectures
-        if lipo -info "$EXECUTABLE" | grep -q "x86_64" && lipo -info "$EXECUTABLE" | grep -q "arm64"; then
-          echo "✅ SUCCESS: Binary is universal2!"
-          echo "   ✓ Contains x86_64 (Intel)"
-          echo "   ✓ Contains arm64 (Apple Silicon)"
-          echo "✅ NO Rosetta 2 required!"
+        if lipo -info "$EXECUTABLE" | grep -q "x86_64"; then
+          echo "✅ SUCCESS: Binary is Intel x86_64!"
+          echo "   ✓ Compatible with macOS 11.0+ (Big Sur, Monterey, Ventura, Sonoma)"
         else
-          echo "❌ ERROR: Binary is not universal2!"
+          echo "❌ ERROR: Binary is not x86_64!"
           exit 1
         fi
     
-    - name: Create DMG
+    - name: Create Intel DMG
       run: |
         mkdir -p dist/dmg
         cp -r dist/ArgoLogViewer.app dist/dmg/
         ln -s /Applications dist/dmg/Applications
-        hdiutil create -volname "Argo Log Viewer" \
+        hdiutil create -volname "Argo Log Viewer (Intel)" \
           -srcfolder dist/dmg \
           -ov -format UDZO \
-          "ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.dmg"
+          "ArgoLogViewer-v${{ github.event.inputs.version }}-macOS-Intel.dmg"
+        rm -rf dist/dmg
     
-    - name: Zip .app
+    - name: Zip Intel .app
       run: |
         cd dist
-        zip -r ../ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.zip ArgoLogViewer.app
+        zip -r ../ArgoLogViewer-v${{ github.event.inputs.version }}-macOS-Intel.zip ArgoLogViewer.app
         cd ..
     
-    - name: Generate checksums
+    - name: Generate Intel checksums
       run: |
-        shasum -a 256 ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.dmg > checksums-macos.txt
-        shasum -a 256 ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.zip >> checksums-macos.txt
+        shasum -a 256 ArgoLogViewer-v${{ github.event.inputs.version }}-macOS-Intel.dmg > checksums-macos-intel.txt
+        shasum -a 256 ArgoLogViewer-v${{ github.event.inputs.version }}-macOS-Intel.zip >> checksums-macos-intel.txt
     
-    - name: Final verification
+    - name: Upload macOS Intel artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ArgoLogViewer-macOS-Intel
+        path: |
+          ArgoLogViewer-v${{ github.event.inputs.version }}-macOS-Intel.dmg
+          ArgoLogViewer-v${{ github.event.inputs.version }}-macOS-Intel.zip
+          checksums-macos-intel.txt
+
+  build-macos-arm:
+    # Build Apple Silicon (arm64) binary
+    runs-on: macos-latest  # Apple Silicon runner
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
       run: |
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "✅ macOS BUILD COMPLETE - UNIVERSAL2"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo ""
+        echo "📦 Installing pip packages for Apple Silicon build..."
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+        echo "✅ Dependencies installed"
+    
+    - name: Build macOS Apple Silicon app
+      run: |
+        export MACOSX_DEPLOYMENT_TARGET=11.0
         
-        # Verify the final DMG
-        echo "🔍 Final verification of DMG contents..."
-        hdiutil attach "ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.dmg" -mountpoint /tmp/verify_dmg
+        echo "🔨 Building Apple Silicon (arm64) app with PyInstaller..."
+        echo "📋 Deployment target: macOS 11.0 Big Sur and later (including Sonoma)"
+        python -m PyInstaller --name="ArgoLogViewer" \
+          --windowed \
+          --onefile \
+          --add-data="app:app" \
+          --hidden-import=PySide6 \
+          --hidden-import=paramiko \
+          --hidden-import=cryptography \
+          --clean \
+          --osx-bundle-identifier=com.harshmeetsingh.argologviewer \
+          --target-arch arm64 \
+          --codesign-identity - \
+          app/main.py
+    
+    - name: Verify Apple Silicon binary
+      run: |
+        echo "🔍 Verifying Apple Silicon build..."
+        EXECUTABLE="dist/ArgoLogViewer.app/Contents/MacOS/ArgoLogViewer"
         
-        DMG_EXECUTABLE="/tmp/verify_dmg/ArgoLogViewer.app/Contents/MacOS/ArgoLogViewer"
-        if [ -f "$DMG_EXECUTABLE" ]; then
-          echo "✅ DMG mounted successfully"
-          echo "📋 Architecture check:"
-          lipo -info "$DMG_EXECUTABLE"
-          
-          if lipo -info "$DMG_EXECUTABLE" | grep -q "x86_64" && lipo -info "$DMG_EXECUTABLE" | grep -q "arm64"; then
-            echo "✅ DMG contains universal2 binary (x86_64 + arm64)"
-            echo "✅ ONE-CLICK INSTALL - NO ROSETTA 2 REQUIRED!"
-          else
-            echo "❌ ERROR: DMG does not contain universal2 binary!"
-            exit 1
-          fi
-        else
-          echo "❌ ERROR: Could not verify DMG contents"
+        if [ ! -f "$EXECUTABLE" ]; then
+          echo "❌ ERROR: Executable not found"
           exit 1
         fi
         
-        hdiutil detach /tmp/verify_dmg || true
-        echo ""
-        echo "✅ Native support for Intel and Apple Silicon Macs"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        lipo -info "$EXECUTABLE"
+        
+        if lipo -info "$EXECUTABLE" | grep -q "arm64"; then
+          echo "✅ SUCCESS: Binary is Apple Silicon arm64!"
+          echo "   ✓ Native support for M1, M2, M3, M4"
+          echo "   ✓ Compatible with macOS 11.0+ (Big Sur, Monterey, Ventura, Sonoma)"
+        else
+          echo "❌ ERROR: Binary is not arm64!"
+          exit 1
+        fi
     
-    - name: Upload macOS artifacts
+    - name: Create Apple Silicon DMG
+      run: |
+        mkdir -p dist/dmg
+        cp -r dist/ArgoLogViewer.app dist/dmg/
+        ln -s /Applications dist/dmg/Applications
+        hdiutil create -volname "Argo Log Viewer (Apple Silicon)" \
+          -srcfolder dist/dmg \
+          -ov -format UDZO \
+          "ArgoLogViewer-v${{ github.event.inputs.version }}-macOS-AppleSilicon.dmg"
+        rm -rf dist/dmg
+    
+    - name: Zip Apple Silicon .app
+      run: |
+        cd dist
+        zip -r ../ArgoLogViewer-v${{ github.event.inputs.version }}-macOS-AppleSilicon.zip ArgoLogViewer.app
+        cd ..
+    
+    - name: Generate Apple Silicon checksums
+      run: |
+        shasum -a 256 ArgoLogViewer-v${{ github.event.inputs.version }}-macOS-AppleSilicon.dmg > checksums-macos-arm.txt
+        shasum -a 256 ArgoLogViewer-v${{ github.event.inputs.version }}-macOS-AppleSilicon.zip >> checksums-macos-arm.txt
+    
+    - name: Upload macOS Apple Silicon artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: ArgoLogViewer-macOS
+        name: ArgoLogViewer-macOS-AppleSilicon
         path: |
-          ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.dmg
-          ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.zip
-          checksums-macos.txt
+          ArgoLogViewer-v${{ github.event.inputs.version }}-macOS-AppleSilicon.dmg
+          ArgoLogViewer-v${{ github.event.inputs.version }}-macOS-AppleSilicon.zip
+          checksums-macos-arm.txt
 
   build-linux:
     runs-on: ubuntu-latest
@@ -264,7 +287,7 @@ jobs:
           checksums-linux.txt
 
   create-release:
-    needs: [build-windows, build-macos, build-linux]
+    needs: [build-windows, build-macos-intel, build-macos-arm, build-linux]
     runs-on: ubuntu-latest
     if: github.event.inputs.create_release == 'true'
     
@@ -275,7 +298,8 @@ jobs:
     - name: Combine checksums
       run: |
         cat ArgoLogViewer-Windows/checksums-windows.txt > CHECKSUMS.txt
-        cat ArgoLogViewer-macOS/checksums-macos.txt >> CHECKSUMS.txt
+        cat ArgoLogViewer-macOS-Intel/checksums-macos-intel.txt >> CHECKSUMS.txt
+        cat ArgoLogViewer-macOS-AppleSilicon/checksums-macos-arm.txt >> CHECKSUMS.txt
         cat ArgoLogViewer-Linux/checksums-linux.txt >> CHECKSUMS.txt
         echo "=== CHECKSUMS ==="
         cat CHECKSUMS.txt
@@ -294,14 +318,28 @@ jobs:
           
           Choose the version for your operating system:
           
-          | Platform | Download | Size |
-          |----------|----------|------|
-          | 🪟 **Windows** | [ArgoLogViewer-v${{ github.event.inputs.version }}-Windows.exe](../../releases/download/v${{ github.event.inputs.version }}/ArgoLogViewer-v${{ github.event.inputs.version }}-Windows.exe) | ~50 MB |
-          | 🍎 **macOS (DMG)** - Universal2 | [ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.dmg](../../releases/download/v${{ github.event.inputs.version }}/ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.dmg) | ~80 MB |
-          | 🍎 **macOS (ZIP)** - Universal2 | [ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.zip](../../releases/download/v${{ github.event.inputs.version }}/ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.zip) | ~80 MB |
-          | 🐧 **Linux** | [ArgoLogViewer-v${{ github.event.inputs.version }}-Linux](../../releases/download/v${{ github.event.inputs.version }}/ArgoLogViewer-v${{ github.event.inputs.version }}-Linux) | ~70 MB |
+          #### 🪟 Windows
+          | Download | Size |
+          |----------|------|
+          | [ArgoLogViewer-v${{ github.event.inputs.version }}-Windows.exe](../../releases/download/v${{ github.event.inputs.version }}/ArgoLogViewer-v${{ github.event.inputs.version }}-Windows.exe) | ~50 MB |
           
-          > 🍎 **macOS Note:** Universal2 binary with native support for both Intel (x86_64) and Apple Silicon (arm64). **One-click install, no Rosetta 2 required!**
+          #### 🍎 macOS
+          **Choose the correct version for your Mac:**
+          
+          | Mac Type | Download (DMG) | Download (ZIP) |
+          |----------|----------------|----------------|
+          | 💻 **Intel Macs** | [macOS-Intel.dmg](../../releases/download/v${{ github.event.inputs.version }}/ArgoLogViewer-v${{ github.event.inputs.version }}-macOS-Intel.dmg) | [macOS-Intel.zip](../../releases/download/v${{ github.event.inputs.version }}/ArgoLogViewer-v${{ github.event.inputs.version }}-macOS-Intel.zip) |
+          | 🚀 **Apple Silicon (M1/M2/M3/M4)** | [macOS-AppleSilicon.dmg](../../releases/download/v${{ github.event.inputs.version }}/ArgoLogViewer-v${{ github.event.inputs.version }}-macOS-AppleSilicon.dmg) | [macOS-AppleSilicon.zip](../../releases/download/v${{ github.event.inputs.version }}/ArgoLogViewer-v${{ github.event.inputs.version }}-macOS-AppleSilicon.zip) |
+          
+          **Not sure which Mac you have?**
+          - Click the Apple menu () → "About This Mac"
+          - **Intel Macs:** Shows "Processor: Intel Core i5/i7/i9"
+          - **Apple Silicon:** Shows "Chip: Apple M1/M2/M3/M4"
+          
+          #### 🐧 Linux
+          | Download | Size |
+          |----------|------|
+          | [ArgoLogViewer-v${{ github.event.inputs.version }}-Linux](../../releases/download/v${{ github.event.inputs.version }}/ArgoLogViewer-v${{ github.event.inputs.version }}-Linux) | ~70 MB |
           
           ### 📋 Installation Instructions
           
@@ -311,13 +349,13 @@ jobs:
           3. Windows Defender may warn you - click "More info" → "Run anyway"
           
           #### macOS (DMG - Recommended)
-          1. Download `ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.dmg`
+          1. Download the correct DMG file for your Mac type
           2. Open the DMG file
           3. Drag "ArgoLogViewer" to Applications folder
-          4. Right-click app → Open (first time only)
+          4. Right-click app → "Open" (first time only, to bypass Gatekeeper)
           
           #### macOS (ZIP)
-          1. Download and unzip
+          1. Download and unzip the correct ZIP file
           2. Move to Applications folder
           3. Run: `xattr -cr /Applications/ArgoLogViewer.app`
           4. Double-click to open
@@ -327,15 +365,31 @@ jobs:
           2. Make executable: `chmod +x ArgoLogViewer-v${{ github.event.inputs.version }}-Linux`
           3. Run: `./ArgoLogViewer-v${{ github.event.inputs.version }}-Linux`
           
+          ### ✅ Compatibility
+          
+          **macOS:**
+          - macOS 11.0 Big Sur and later
+          - macOS 12.0 Monterey ✅
+          - macOS 13.0 Ventura ✅
+          - macOS 14.0 Sonoma ✅
+          - macOS 15.0 Sequoia ✅
+          - Native support for both Intel and Apple Silicon
+          
+          **Windows:**
+          - Windows 10 and later
+          
+          **Linux:**
+          - Most modern distributions
+          
           ### ✅ Verify Download (SHA-256)
           
           See `CHECKSUMS.txt` for SHA-256 hashes to verify your download.
           
           ### 🆕 What's New in v${{ github.event.inputs.version }}
           
-          - Initial release with production-grade build system
-          - Cross-platform support (Windows, macOS, Linux)
-          - Professional installers for all platforms
+          - Separate optimized builds for Intel and Apple Silicon Macs
+          - Full support for macOS Sonoma
+          - Enhanced cross-platform compatibility
           
           ### 🐛 Found a Bug?
           
@@ -354,8 +408,10 @@ jobs:
         prerelease: false
         files: |
           ArgoLogViewer-Windows/ArgoLogViewer-v${{ github.event.inputs.version }}-Windows.exe
-          ArgoLogViewer-macOS/ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.dmg
-          ArgoLogViewer-macOS/ArgoLogViewer-v${{ github.event.inputs.version }}-macOS.zip
+          ArgoLogViewer-macOS-Intel/ArgoLogViewer-v${{ github.event.inputs.version }}-macOS-Intel.dmg
+          ArgoLogViewer-macOS-Intel/ArgoLogViewer-v${{ github.event.inputs.version }}-macOS-Intel.zip
+          ArgoLogViewer-macOS-AppleSilicon/ArgoLogViewer-v${{ github.event.inputs.version }}-macOS-AppleSilicon.dmg
+          ArgoLogViewer-macOS-AppleSilicon/ArgoLogViewer-v${{ github.event.inputs.version }}-macOS-AppleSilicon.zip
           ArgoLogViewer-Linux/ArgoLogViewer-v${{ github.event.inputs.version }}-Linux
           CHECKSUMS.txt
       env:
