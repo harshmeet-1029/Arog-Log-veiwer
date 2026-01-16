@@ -17,7 +17,7 @@ CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "🚀 GitHub Release Upload Script"
+echo "🍎 GitHub Release Upload Script - macOS Only"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
@@ -28,10 +28,10 @@ if [ -z "$1" ]; then
     echo "Usage: ./release-only.sh <version> [github-token] [file1] [file2] ..."
     echo ""
     echo "Examples:"
-    echo "  # Upload specific files"
+    echo "  # Upload specific macOS files"
     echo "  ./release-only.sh 1.0.0 ghp_token file1.dmg file2.zip"
     echo ""
-    echo "  # Auto-detect files based on version"
+    echo "  # Auto-detect macOS files based on version"
     echo "  ./release-only.sh 1.0.0 ghp_token"
     echo ""
     echo "  # Use GITHUB_TOKEN env var"
@@ -77,21 +77,16 @@ shift 2 2>/dev/null || shift 1  # Remove version and token from args
 FILES_TO_UPLOAD=("$@")
 
 if [ ${#FILES_TO_UPLOAD[@]} -eq 0 ]; then
-    echo -e "${CYAN}🔍 Auto-detecting files...${NC}"
+    echo -e "${CYAN}🔍 Auto-detecting macOS files...${NC}"
     
-    # Look for common patterns
+    # Look for macOS patterns only (DMG and ZIP)
     PATTERNS=(
         "ArgoLogViewer-v${VERSION}-macOS-Intel.dmg"
         "ArgoLogViewer-v${VERSION}-macOS-Intel.zip"
         "ArgoLogViewer-v${VERSION}-macOS-ARM64.dmg"
         "ArgoLogViewer-v${VERSION}-macOS-ARM64.zip"
-        "ArgoLogViewer-v${VERSION}-Windows.exe"
-        "ArgoLogViewer-v${VERSION}-Windows.zip"
-        "ArgoLogViewer-v${VERSION}-Linux.tar.gz"
-        "ArgoLogViewer-v${VERSION}-Linux.zip"
         "ArgoLogViewer-macOS-Intel.dmg"
         "ArgoLogViewer-macOS-ARM64.dmg"
-        "ArgoLogViewer.exe"
         "checksums*.txt"
     )
     
@@ -103,9 +98,9 @@ if [ ${#FILES_TO_UPLOAD[@]} -eq 0 ]; then
         done
     done
     
-    # Also check dist folder
+    # Also check dist folder for macOS files only
     if [ -d "dist" ]; then
-        for ext in exe dmg zip tar.gz; do
+        for ext in dmg zip; do
             for file in dist/*.$ext; do
                 if [ -f "$file" ]; then
                     FILES_TO_UPLOAD+=("$file")
@@ -119,31 +114,54 @@ if [ ${#FILES_TO_UPLOAD[@]} -eq 0 ]; then
 fi
 
 if [ ${#FILES_TO_UPLOAD[@]} -eq 0 ]; then
-    echo -e "${RED}❌ ERROR: No files found to upload!${NC}"
+    echo -e "${RED}❌ ERROR: No macOS files found to upload!${NC}"
     echo ""
-    echo "Specify files manually:"
+    echo "Specify macOS files manually:"
     echo "  ./release-only.sh $VERSION $GITHUB_TOKEN file1.dmg file2.zip"
     echo ""
-    echo "Or make sure files exist in current directory with naming pattern:"
-    echo "  ArgoLogViewer-v${VERSION}-*.dmg"
-    echo "  ArgoLogViewer-v${VERSION}-*.zip"
+    echo "Or make sure macOS files exist in current directory with naming pattern:"
+    echo "  ArgoLogViewer-v${VERSION}-macOS-Intel.dmg"
+    echo "  ArgoLogViewer-v${VERSION}-macOS-Intel.zip"
+    echo "  ArgoLogViewer-v${VERSION}-macOS-ARM64.dmg"
+    echo "  ArgoLogViewer-v${VERSION}-macOS-ARM64.zip"
     echo ""
     exit 1
 fi
 
-echo -e "${GREEN}   ✅ Found ${#FILES_TO_UPLOAD[@]} file(s) to upload:${NC}"
+echo -e "${GREEN}   ✅ Found ${#FILES_TO_UPLOAD[@]} macOS file(s) to upload:${NC}"
+
+# Filter to only .dmg and .zip files
+FILTERED_FILES=()
 for file in "${FILES_TO_UPLOAD[@]}"; do
-    if [ -f "$file" ]; then
-        SIZE=$(du -h "$file" | cut -f1)
-        echo "      - $file ($SIZE)"
+    filename=$(basename "$file")
+    extension="${filename##*.}"
+    
+    if [[ "$extension" == "dmg" || "$extension" == "zip" || "$filename" == "checksums"* ]]; then
+        FILTERED_FILES+=("$file")
+        if [ -f "$file" ]; then
+            SIZE=$(du -h "$file" | cut -f1)
+            echo "      - $file ($SIZE)"
+        else
+            echo -e "${YELLOW}      ⚠️  $file (not found - will skip)${NC}"
+        fi
     else
-        echo -e "${YELLOW}      ⚠️  $file (not found - will skip)${NC}"
+        echo -e "${YELLOW}      ⚠️  Skipping $file (not a macOS DMG/ZIP file)${NC}"
     fi
 done
+
+FILES_TO_UPLOAD=("${FILTERED_FILES[@]}")
 echo ""
 
 # Check if release exists
 echo -e "${CYAN}🔍 Checking release v${VERSION}...${NC}"
+
+# Validate that we have files to upload after filtering
+if [ ${#FILES_TO_UPLOAD[@]} -eq 0 ]; then
+    echo -e "${RED}❌ ERROR: No valid macOS files (.dmg/.zip) to upload after filtering!${NC}"
+    echo ""
+    exit 1
+fi
+
 RELEASE_ID=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
   "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/tags/v${VERSION}" \
   | grep '"id":' | head -1 | sed 's/[^0-9]*//g')
@@ -219,7 +237,7 @@ upload_file() {
           -H "Authorization: token $GITHUB_TOKEN" \
           -H "Content-Type: $CONTENT_TYPE" \
           --data-binary @"$file" \
-          "https://uploads.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/$RELEASE_ID/assets?name=$filename" 2>&1)
+          "https://uploads.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/$RELEASE_ID/assets?name=$filename")
         
         if [ "$HTTP_CODE" -eq 201 ]; then
             echo -e "${GREEN}   ✅ $filename uploaded successfully${NC}"

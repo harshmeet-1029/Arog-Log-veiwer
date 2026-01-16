@@ -250,7 +250,7 @@ if [ "$AUTO_UPLOAD" = true ]; then
           -H "Authorization: token $GITHUB_TOKEN" \
           -H "Content-Type: application/octet-stream" \
           --data-binary @"$DMG_FILE" \
-          "https://uploads.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/$RELEASE_ID/assets?name=$DMG_FILE" 2>&1)
+          "https://uploads.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/$RELEASE_ID/assets?name=$DMG_FILE")
         
         if [ "$HTTP_CODE" -eq 201 ]; then
             echo -e "${GREEN}   ✅ DMG uploaded successfully${NC}"
@@ -300,7 +300,7 @@ if [ "$AUTO_UPLOAD" = true ]; then
           -H "Authorization: token $GITHUB_TOKEN" \
           -H "Content-Type: application/zip" \
           --data-binary @"$ZIP_FILE" \
-          "https://uploads.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/$RELEASE_ID/assets?name=$ZIP_FILE" 2>&1)
+          "https://uploads.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/$RELEASE_ID/assets?name=$ZIP_FILE")
         
         if [ "$HTTP_CODE" -eq 201 ]; then
             echo -e "${GREEN}   ✅ ZIP uploaded successfully${NC}"
