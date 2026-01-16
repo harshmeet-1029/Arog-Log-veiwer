@@ -87,16 +87,22 @@ echo ""
 
 # Clean previous builds
 echo -e "${BLUE}🧹 Cleaning previous builds...${NC}"
-rm -rf build dist *.dmg *.zip *.txt app/icon.icns app/icon.iconset
+rm -rf build dist *.dmg *.zip checksums-*.txt app/icon.icns app/icon.iconset
 echo -e "${GREEN}   ✅ Cleaned${NC}"
 echo ""
 
-# Install dependencies
-echo -e "${BLUE}📦 Installing dependencies...${NC}"
-python3 -m pip install --upgrade pip > /dev/null 2>&1
+# Setup venv and install dependencies
+echo -e "${BLUE}📦 Setting up virtual environment...${NC}"
+if [ ! -d "venv" ] || [ ! -f "venv/bin/activate" ]; then
+    echo "   Creating new venv..."
+    python3 -m venv venv
+else
+    echo "   Using existing venv..."
+fi
+source venv/bin/activate
+echo "   Installing dependencies..."
 pip install -r requirements.txt > /dev/null 2>&1
-pip install pyinstaller > /dev/null 2>&1
-echo -e "${GREEN}   ✅ Dependencies installed${NC}"
+echo -e "${GREEN}   ✅ Venv activated and dependencies installed${NC}"
 echo ""
 
 # Create macOS icon
