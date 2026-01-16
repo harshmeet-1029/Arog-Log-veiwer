@@ -1,12 +1,21 @@
 """
 Configuration management for Argo Log Viewer.
 
+Copyright (c) 2024-2026 Harshmeet Singh. All Rights Reserved.
+Proprietary and Confidential.
+
+This software is licensed under a proprietary license.
+Unauthorized copying, distribution, forking, or use is strictly prohibited.
+See LICENSE.txt for details.
+
 SECURITY: This module externalizes hardcoded credentials and connection details.
 In production, consider using environment variables or a secure vault.
 """
 import os
+import json
 import logging
 from typing import Optional
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -71,10 +80,40 @@ class SSHConfig:
         Returns:
             Path to SSH config file
         """
+        # Check for custom SSH folder first
+        custom_ssh_folder = AppConfig.get_custom_ssh_folder()
+        if custom_ssh_folder and os.path.exists(custom_ssh_folder):
+            custom_config_path = os.path.join(custom_ssh_folder, "config")
+            if os.path.exists(custom_config_path):
+                logger.info(f"Using custom SSH config: {custom_config_path}")
+                return custom_config_path
+            else:
+                logger.warning(f"Custom SSH folder set but config not found: {custom_config_path}")
+        
+        # Fall back to default path
         default_path = os.path.expanduser("~/.ssh/config")
         path = os.getenv("SSH_CONFIG_PATH", default_path)
         logger.debug(f"Using SSH config: {path}")
         return path
+    
+    @staticmethod
+    def get_ssh_folder() -> str:
+        """
+        Get SSH folder path (directory containing config, keys, etc.)
+        
+        Returns:
+            Path to SSH folder
+        """
+        # Check for custom SSH folder first
+        custom_ssh_folder = AppConfig.get_custom_ssh_folder()
+        if custom_ssh_folder and os.path.exists(custom_ssh_folder):
+            logger.info(f"Using custom SSH folder: {custom_ssh_folder}")
+            return custom_ssh_folder
+        
+        # Fall back to default
+        default_folder = os.path.expanduser("~/.ssh")
+        logger.debug(f"Using default SSH folder: {default_folder}")
+        return default_folder
 
 
 class KubernetesConfig:
@@ -155,3 +194,144 @@ class SecurityConfig:
         """
         # Default: owner read/write only (0o600 = 384 decimal)
         return 0o600
+
+
+class AppConfig:
+    """Application configuration with persistence."""
+    
+    _config_file = None
+    
+    @staticmethod
+    def get_config_file_path() -> Path:
+        """Get the path to the configuration file."""
+        if AppConfig._config_file:
+            return AppConfig._config_file
+        
+        # Store config in user's home directory
+        config_dir = Path.home() / ".argo-log-viewer"
+        config_dir.mkdir(exist_ok=True)
+        AppConfig._config_file = config_dir / "config.json"
+        return AppConfig._config_file
+    
+    @staticmethod
+    def load_config() -> dict:
+        """Load configuration from file."""
+        config_path = AppConfig.get_config_file_path()
+        if config_path.exists():
+            try:
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+                    logger.debug(f"Loaded config from {config_path}")
+                    return config
+            except Exception as e:
+                logger.error(f"Error loading config: {e}")
+                return {}
+        return {}
+    
+    @staticmethod
+    def save_config(config: dict) -> None:
+        """Save configuration to file."""
+        config_path = AppConfig.get_config_file_path()
+        try:
+            with open(config_path, 'w') as f:
+                json.dump(config, f, indent=2)
+            logger.info(f"Saved config to {config_path}")
+            
+            # Set secure permissions on config file (Unix-like systems)
+            if os.name != 'nt':
+                os.chmod(config_path, 0o600)
+        except Exception as e:
+            logger.error(f"Error saving config: {e}")
+    
+    @staticmethod
+    def get_custom_ssh_folder() -> Optional[str]:
+        """Get custom SSH folder path if configured."""
+        config = AppConfig.load_config()
+        ssh_folder = config.get('custom_ssh_folder')
+        if ssh_folder:
+            logger.debug(f"Using custom SSH folder: {ssh_folder}")
+        return ssh_folder
+    
+    @staticmethod
+    def set_custom_ssh_folder(folder_path: Optional[str]) -> None:
+        """Set custom SSH folder path."""
+        config = AppConfig.load_config()
+        if folder_path:
+            config['custom_ssh_folder'] = folder_path
+            logger.info(f"Set custom SSH folder to: {folder_path}")
+        else:
+            config.pop('custom_ssh_folder', None)
+            logger.info("Removed custom SSH folder configuration")
+        AppConfig.save_config(config)
+    
+    @staticmethod
+    def get_last_update_check() -> Optional[float]:
+        """Get timestamp of last update check."""
+        config = AppConfig.load_config()
+        return config.get('last_update_check')
+    
+    @staticmethod
+    def set_last_update_check(timestamp: float) -> None:
+        """Set timestamp of last update check."""
+        config = AppConfig.load_config()
+        config['last_update_check'] = timestamp
+        AppConfig.save_config(config)
+    
+    @staticmethod
+    def get_skip_version() -> Optional[str]:
+        """Get version to skip for updates."""
+        config = AppConfig.load_config()
+        return config.get('skip_update_version')
+    
+    @staticmethod
+    def set_skip_version(version: Optional[str]) -> None:
+        """Set version to skip for updates."""
+        config = AppConfig.load_config()
+        if version:
+            config['skip_update_version'] = version
+        else:
+            config.pop('skip_update_version', None)
+        AppConfig.save_config(config)
+
+
+class UpdateConfig:
+    """OTA Update configuration."""
+    
+    # Current application version
+    CURRENT_VERSION = "1.0.0"
+    
+    # Update server URL (GitHub Releases - public repo, no token needed!)
+    UPDATE_SERVER_URL = os.getenv(
+        "ARGO_UPDATE_SERVER_URL",
+        "https://api.github.com/repos/harshmeet-1029/Arog-Log-veiwer/releases/latest"
+    )
+    
+    # Check for updates on startup
+    CHECK_ON_STARTUP = os.getenv("ARGO_CHECK_UPDATES_ON_STARTUP", "true").lower() in ('true', '1', 'yes')
+    
+    # Update check interval in seconds (default: 24 hours)
+    UPDATE_CHECK_INTERVAL = int(os.getenv("ARGO_UPDATE_CHECK_INTERVAL", str(24 * 60 * 60)))
+    
+    @staticmethod
+    def get_current_version() -> str:
+        """Get current application version."""
+        return UpdateConfig.CURRENT_VERSION
+    
+    @staticmethod
+    def get_update_server_url() -> str:
+        """Get update server URL."""
+        return UpdateConfig.UPDATE_SERVER_URL
+    
+    @staticmethod
+    def should_check_for_updates() -> bool:
+        """Check if we should check for updates based on interval."""
+        if not UpdateConfig.CHECK_ON_STARTUP:
+            return False
+        
+        last_check = AppConfig.get_last_update_check()
+        if last_check is None:
+            return True
+        
+        import time
+        elapsed = time.time() - last_check
+        return elapsed >= UpdateConfig.UPDATE_CHECK_INTERVAL

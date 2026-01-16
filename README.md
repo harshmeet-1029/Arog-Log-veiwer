@@ -5,6 +5,8 @@ A production-grade Python desktop GUI application for viewing Argo Workflow logs
 ## Features
 
 - **Stateful SSH Connection Chain**: Maintains proper SSH session through jump host → internal server → sudo context
+- **Custom SSH Folder Configuration**: Point to any SSH folder with your config and keys (NEW!)
+- **OTA Updates**: Automatic update checking with one-click installation (NEW!)
 - **Production-Grade Security**: 
   - Read-only operations only (no kubectl apply/delete/exec/scale)
   - Input sanitization to prevent command injection
@@ -112,6 +114,23 @@ chmod +x run.sh
 source venv/bin/activate
 python -m app.main
 ```
+
+### New Features
+
+#### 1. Custom SSH Folder Configuration
+Point to any SSH folder with your config and keys:
+- `Settings` → `Custom SSH Folder...`
+- Browse to your SSH folder or leave empty for default (~/.ssh)
+- Useful for project-specific SSH configs or encrypted drives
+
+#### 2. OTA (Over-The-Air) Updates
+Automatic update checking:
+- Checks for updates on startup (once per 24 hours)
+- Manual check: `Settings` → `Check for Updates`
+- One-click download and installation
+- View release notes before updating
+
+**For complete guide on all features, see: [FEATURES_GUIDE.md](FEATURES_GUIDE.md)**
 
 ### Using the Application
 
@@ -282,7 +301,24 @@ setup_logging(log_level=logging.DEBUG, log_to_file=True)
 
 ## License
 
-[Your License Here]
+**Proprietary Software - All Rights Reserved**
+
+Copyright © 2024-2026 Harshmeet Singh
+
+This software is proprietary and confidential. Unauthorized copying, forking, 
+distribution, or use without explicit written permission from the copyright 
+holder is strictly prohibited.
+
+**Commercial use, forking, and derivative works require:**
+- Written permission from the author
+- Payment of royalty fees
+- Execution of a separate licensing agreement
+
+See [LICENSE.txt](LICENSE.txt) for complete terms and conditions.
+
+**For commercial licensing or permissions, contact:**
+- harshmeetsingh010@gmail.com
+- harshmeet.singh@netcoreunbxd.com
 
 ## Developer
 
@@ -309,3 +345,5 @@ For issues or questions:
 - Console output panel
 - Input sanitization
 - Comprehensive logging
+- **NEW:** Custom SSH folder configuration
+- **NEW:** OTA update system

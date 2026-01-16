@@ -1,3 +1,13 @@
+"""
+Argo Log Viewer - Main Application Entry Point
+
+Copyright (c) 2024-2026 Harshmeet Singh. All Rights Reserved.
+Proprietary and Confidential.
+
+This software is licensed under a proprietary license.
+Unauthorized copying, distribution, forking, or use is strictly prohibited.
+See LICENSE.txt for details.
+"""
 import sys
 import logging
 import os

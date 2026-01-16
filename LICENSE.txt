@@ -1,21 +1,146 @@
-MIT License
+Proprietary Software License Agreement
 
-Copyright (c) 2026 Your Company Name
+Copyright (c) 2024-2026 Harshmeet Singh. All Rights Reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+================================================================================
+                        IMPORTANT - READ CAREFULLY
+================================================================================
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+This software and associated documentation files (the "Software") are the 
+proprietary property of Harshmeet Singh ("Licensor"). By using, downloading, 
+or accessing the Software, you ("Licensee") agree to be bound by the terms 
+of this Agreement.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+================================================================================
+                            GRANT OF LICENSE
+================================================================================
+
+Subject to the terms and conditions of this Agreement, Licensor grants 
+Licensee a limited, non-exclusive, non-transferable, revocable license to:
+
+1. USE the Software for personal or internal business purposes only.
+2. DOWNLOAD and INSTALL the Software on devices you own or control.
+
+================================================================================
+                            RESTRICTIONS
+================================================================================
+
+Licensee SHALL NOT, without explicit written permission from Licensor:
+
+1. FORK, copy, or create derivative works based on the Software source code.
+
+2. DISTRIBUTE, sublicense, sell, rent, lease, or transfer the Software or 
+   any portion thereof to any third party.
+
+3. MODIFY, reverse engineer, decompile, disassemble, or attempt to derive 
+   the source code of the compiled Software.
+
+4. REMOVE or alter any copyright, trademark, or other proprietary notices 
+   from the Software.
+
+5. USE the Software for any commercial purpose without a separate commercial 
+   license agreement.
+
+6. REDISTRIBUTE the Software in any form, whether modified or unmodified.
+
+7. CREATE competing products or services using the Software or its components.
+
+================================================================================
+                        COMMERCIAL USE & ROYALTIES
+================================================================================
+
+COMMERCIAL USE PROHIBITED: This license does NOT permit commercial use, 
+distribution, or integration of the Software into commercial products without 
+a separate commercial license agreement.
+
+FORKING & DERIVATIVES: Any forking, copying, or creation of derivative works 
+requires:
+   a) Written permission from Licensor
+   b) Payment of royalty fees as determined by Licensor
+   c) Execution of a separate licensing agreement
+
+For commercial licensing, forking rights, or royalty arrangements, contact:
+   - Harshmeet Singh
+   - Email: harshmeetsingh010@gmail.com
+   - Email: harshmeet.singh@netcoreunbxd.com
+
+================================================================================
+                        INTELLECTUAL PROPERTY
+================================================================================
+
+All right, title, and interest in and to the Software, including all 
+intellectual property rights therein, remain exclusively with Licensor. 
+This Agreement does NOT grant Licensee any ownership rights to the Software.
+
+================================================================================
+                            TERMINATION
+================================================================================
+
+This license is effective until terminated. Licensor may terminate this 
+license at any time if Licensee breaches any term of this Agreement. Upon 
+termination, Licensee must:
+   1. Immediately cease all use of the Software
+   2. Delete or destroy all copies of the Software
+   3. Certify in writing that all copies have been destroyed
+
+================================================================================
+                        WARRANTY DISCLAIMER
+================================================================================
+
+THE SOFTWARE IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND, EXPRESS OR 
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, 
+FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT.
+
+LICENSOR DOES NOT WARRANT THAT:
+   - The Software will meet Licensee's requirements
+   - The Software will operate uninterrupted or error-free
+   - All errors will be corrected
+
+================================================================================
+                        LIMITATION OF LIABILITY
+================================================================================
+
+IN NO EVENT SHALL LICENSOR BE LIABLE FOR ANY SPECIAL, INCIDENTAL, INDIRECT, 
+OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT LIMITATION, DAMAGES 
+FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF BUSINESS 
+INFORMATION, OR ANY OTHER PECUNIARY LOSS) ARISING OUT OF THE USE OF OR 
+INABILITY TO USE THE SOFTWARE.
+
+================================================================================
+                            GOVERNING LAW
+================================================================================
+
+This Agreement shall be governed by and construed in accordance with the 
+laws of India, without regard to its conflict of law provisions.
+
+================================================================================
+                            ENTIRE AGREEMENT
+================================================================================
+
+This Agreement constitutes the entire agreement between Licensor and Licensee 
+concerning the Software and supersedes all prior or contemporaneous 
+understandings or agreements, written or oral, regarding such subject matter.
+
+================================================================================
+                        CONTACT INFORMATION
+================================================================================
+
+For questions about this license, commercial licensing, or to request 
+permission for forking/derivative works:
+
+   Harshmeet Singh
+   Email: harshmeetsingh010@gmail.com
+   Email: harshmeet.singh@netcoreunbxd.com
+
+================================================================================
+
+BY USING THIS SOFTWARE, YOU ACKNOWLEDGE THAT YOU HAVE READ THIS AGREEMENT, 
+UNDERSTAND IT, AND AGREE TO BE BOUND BY ITS TERMS AND CONDITIONS.
+
+IF YOU DO NOT AGREE TO THESE TERMS, DO NOT USE, DOWNLOAD, OR ACCESS THE 
 SOFTWARE.
+
+================================================================================
+
+Last Updated: January 16, 2026
+Version: 1.0

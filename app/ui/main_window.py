@@ -17,10 +17,13 @@ from PySide6.QtGui import (
 from app.ssh.argo_worker import ArgoWorker
 from app.ssh.connection_manager import SSHConnectionManager
 from app.logging_config import get_logger
-from app.config import SecurityConfig
+from app.config import SecurityConfig, AppConfig, UpdateConfig
+from app.update_checker import UpdateChecker, UpdateInfo
 import os
 import stat
 import sys
+import webbrowser
+from typing import Optional as Opt_Type
 
 logger = get_logger(__name__)
 
@@ -304,6 +307,9 @@ class MainWindow(QWidget):
         self.worker: Optional[ArgoWorker] = None
         self.is_connected = False
         
+        # Update state
+        self.pending_update: Opt_Type[UpdateInfo] = None
+        
         # Theme state
         self.current_theme = "dark"
         
@@ -321,6 +327,10 @@ class MainWindow(QWidget):
         self._setup_shortcuts()
         self._set_initial_state()
         self._apply_theme(self.current_theme)
+        
+        # Check for updates on startup (in background)
+        if UpdateConfig.should_check_for_updates():
+            self._check_for_updates_background()
         
         logger.info("MainWindow initialization complete")
     
@@ -553,6 +563,21 @@ class MainWindow(QWidget):
         about_action.setStatusTip("About Argo Log Viewer")
         about_action.triggered.connect(self._show_about_dialog)
         menu_bar.addAction(about_action)
+        
+        # Settings menu
+        settings_menu = menu_bar.addMenu("Settings")
+        
+        ssh_config_settings_action = QAction("Custom SSH Folder...", self)
+        ssh_config_settings_action.setStatusTip("Configure custom SSH folder location")
+        ssh_config_settings_action.triggered.connect(self._show_ssh_folder_config_dialog)
+        settings_menu.addAction(ssh_config_settings_action)
+        
+        settings_menu.addSeparator()
+        
+        check_updates_action = QAction("Check for Updates", self)
+        check_updates_action.setStatusTip("Check for application updates")
+        check_updates_action.triggered.connect(self._check_for_updates_manual)
+        settings_menu.addAction(check_updates_action)
         
         # Help menu with shortcuts
         help_menu = menu_bar.addMenu("Help")
@@ -1881,6 +1906,402 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
             """)
         
         dialog.exec()
+    
+    def _show_ssh_folder_config_dialog(self):
+        """Show the SSH folder configuration dialog."""
+        logger.info("Showing SSH folder configuration dialog")
+        
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Custom SSH Folder Configuration")
+        dialog.setMinimumWidth(600)
+        dialog.setMinimumHeight(300)
+        
+        layout = QVBoxLayout()
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Title
+        title_label = QLabel("Custom SSH Folder")
+        title_font = QFont()
+        title_font.setPointSize(14)
+        title_font.setBold(True)
+        title_label.setFont(title_font)
+        layout.addWidget(title_label)
+        
+        # Explanation
+        explanation = QLabel(
+            "You can configure a custom SSH folder that contains your SSH config file, "
+            "private keys, and other SSH-related files. This is useful if you have SSH "
+            "configurations in a non-standard location.\n\n"
+            "The folder should contain:\n"
+            "• config file (SSH configuration)\n"
+            "• Private keys (e.g., id_rsa, id_ed25519)\n"
+            "• known_hosts file\n\n"
+            "If not set, the default ~/.ssh folder will be used."
+        )
+        explanation.setWordWrap(True)
+        explanation.setStyleSheet("color: gray; font-size: 10pt;")
+        layout.addWidget(explanation)
+        
+        # Current configuration
+        current_ssh_folder = AppConfig.get_custom_ssh_folder()
+        current_label = QLabel(f"Current: {current_ssh_folder if current_ssh_folder else 'Default (~/.ssh)'}")
+        current_label.setStyleSheet("font-weight: bold;")
+        layout.addWidget(current_label)
+        
+        # Folder selector
+        folder_layout = QHBoxLayout()
+        folder_label = QLabel("SSH Folder:")
+        folder_layout.addWidget(folder_label)
+        
+        folder_path_input = QLineEdit()
+        folder_path_input.setText(current_ssh_folder if current_ssh_folder else "")
+        folder_path_input.setPlaceholderText("Select a folder or leave empty for default")
+        folder_layout.addWidget(folder_path_input)
+        
+        browse_btn = QPushButton("Browse...")
+        browse_btn.setFixedWidth(100)
+        browse_btn.clicked.connect(
+            lambda: self._browse_for_ssh_folder(folder_path_input)
+        )
+        folder_layout.addWidget(browse_btn)
+        
+        layout.addLayout(folder_layout)
+        
+        # Remove button
+        remove_btn = QPushButton("Remove Custom Folder (Use Default)")
+        remove_btn.clicked.connect(lambda: folder_path_input.clear())
+        layout.addWidget(remove_btn)
+        
+        # Validation status
+        validation_label = QLabel("")
+        validation_label.setWordWrap(True)
+        layout.addWidget(validation_label)
+        
+        # Validate on text change
+        def validate_folder():
+            path = folder_path_input.text().strip()
+            if not path:
+                validation_label.setText("✓ Will use default SSH folder (~/.ssh)")
+                validation_label.setStyleSheet("color: green;")
+                return True
+            
+            if not os.path.exists(path):
+                validation_label.setText("✗ Folder does not exist")
+                validation_label.setStyleSheet("color: red;")
+                return False
+            
+            if not os.path.isdir(path):
+                validation_label.setText("✗ Path is not a directory")
+                validation_label.setStyleSheet("color: red;")
+                return False
+            
+            # Check for config file
+            config_path = os.path.join(path, "config")
+            if not os.path.exists(config_path):
+                validation_label.setText("⚠ Warning: No 'config' file found in this folder")
+                validation_label.setStyleSheet("color: orange;")
+                return True  # Allow but warn
+            
+            validation_label.setText("✓ Valid SSH folder")
+            validation_label.setStyleSheet("color: green;")
+            return True
+        
+        folder_path_input.textChanged.connect(lambda: validate_folder())
+        validate_folder()  # Initial validation
+        
+        layout.addSpacing(10)
+        
+        # Buttons
+        button_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        
+        def on_accept():
+            path = folder_path_input.text().strip()
+            if path and not validate_folder():
+                QMessageBox.warning(dialog, "Invalid Folder", "Please select a valid SSH folder")
+                return
+            
+            # Save configuration
+            if path:
+                AppConfig.set_custom_ssh_folder(path)
+                logger.info(f"Custom SSH folder set to: {path}")
+                QMessageBox.information(
+                    dialog,
+                    "Configuration Saved",
+                    f"Custom SSH folder has been set to:\n{path}\n\n"
+                    "This will be used for the next SSH connection."
+                )
+            else:
+                AppConfig.set_custom_ssh_folder(None)
+                logger.info("Custom SSH folder removed, using default")
+                QMessageBox.information(
+                    dialog,
+                    "Configuration Saved",
+                    "Custom SSH folder has been removed.\n\n"
+                    "The default ~/.ssh folder will be used."
+                )
+            
+            dialog.accept()
+        
+        button_box.accepted.connect(on_accept)
+        button_box.rejected.connect(dialog.reject)
+        layout.addWidget(button_box)
+        
+        dialog.setLayout(layout)
+        
+        # Apply current theme to dialog
+        if self.current_theme == "dark":
+            dialog.setStyleSheet("""
+                QDialog {
+                    background-color: #2b2b2b;
+                    color: #e0e0e0;
+                }
+                QLineEdit {
+                    background-color: #3c3c3c;
+                    color: #e0e0e0;
+                    border: 1px solid #555;
+                    padding: 5px;
+                }
+            """)
+        
+        dialog.exec()
+    
+    def _browse_for_ssh_folder(self, input_widget: QLineEdit):
+        """Open folder browser for SSH folder selection."""
+        current_path = input_widget.text().strip()
+        if not current_path or not os.path.exists(current_path):
+            current_path = os.path.expanduser("~")
+        
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            "Select SSH Folder",
+            current_path,
+            QFileDialog.Option.ShowDirsOnly
+        )
+        
+        if folder:
+            input_widget.setText(folder)
+            logger.debug(f"Selected SSH folder: {folder}")
+    
+    # -------------------------
+    # Update Checking Methods
+    # -------------------------
+    
+    def _check_for_updates_background(self):
+        """Check for updates in the background (non-blocking)."""
+        from PySide6.QtCore import QThread
+        
+        logger.info("Starting background update check")
+        
+        class UpdateCheckThread(QThread):
+            def __init__(self, parent):
+                super().__init__(parent)
+                self.update_info = None
+            
+            def run(self):
+                self.update_info = UpdateChecker.check_for_updates()
+                UpdateChecker.mark_update_checked()
+        
+        self.update_thread = UpdateCheckThread(self)
+        self.update_thread.finished.connect(self._on_update_check_complete)
+        self.update_thread.start()
+    
+    def _on_update_check_complete(self):
+        """Handle completion of background update check."""
+        if hasattr(self, 'update_thread'):
+            update_info = self.update_thread.update_info
+            if update_info:
+                logger.info(f"Update available: {update_info.version}")
+                self.pending_update = update_info
+                self._show_update_notification(update_info)
+            else:
+                logger.info("No updates available")
+    
+    def _check_for_updates_manual(self):
+        """Manually check for updates (triggered by user)."""
+        logger.info("Manual update check requested")
+        
+        # Show temporary message in console
+        self.console_output.append("\n[INFO] Checking for updates...\n")
+        
+        # Check in background
+        from PySide6.QtCore import QThread
+        
+        class UpdateCheckThread(QThread):
+            def __init__(self, parent):
+                super().__init__(parent)
+                self.update_info = None
+                self.error = None
+            
+            def run(self):
+                try:
+                    self.update_info = UpdateChecker.check_for_updates()
+                    UpdateChecker.mark_update_checked()
+                except Exception as e:
+                    self.error = str(e)
+        
+        self.manual_update_thread = UpdateCheckThread(self)
+        self.manual_update_thread.finished.connect(self._on_manual_update_check_complete)
+        self.manual_update_thread.start()
+    
+    def _on_manual_update_check_complete(self):
+        """Handle completion of manual update check."""
+        if hasattr(self, 'manual_update_thread'):
+            if self.manual_update_thread.error:
+                QMessageBox.critical(
+                    self,
+                    "Update Check Failed",
+                    f"Failed to check for updates:\n{self.manual_update_thread.error}"
+                )
+                return
+            
+            update_info = self.manual_update_thread.update_info
+            if update_info:
+                logger.info(f"Update available: {update_info.version}")
+                self.pending_update = update_info
+                self._show_update_dialog(update_info)
+            else:
+                QMessageBox.information(
+                    self,
+                    "Up to Date",
+                    f"You are running the latest version ({UpdateConfig.get_current_version()})."
+                )
+    
+    def _show_update_notification(self, update_info: UpdateInfo):
+        """Show a non-intrusive update notification."""
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("Update Available")
+        msg_box.setIcon(QMessageBox.Icon.Information)
+        
+        if update_info.is_critical:
+            msg_box.setIcon(QMessageBox.Icon.Warning)
+            msg_box.setText(f"⚠️ Critical Update Available: v{update_info.version}")
+        else:
+            msg_box.setText(f"Update Available: v{update_info.version}")
+        
+        msg_box.setInformativeText(
+            f"A new version of Argo Log Viewer is available.\n\n"
+            f"Current version: {UpdateConfig.get_current_version()}\n"
+            f"New version: {update_info.version}\n\n"
+            "Would you like to download it now?"
+        )
+        
+        msg_box.setStandardButtons(
+            QMessageBox.StandardButton.Yes | 
+            QMessageBox.StandardButton.No
+        )
+        
+        if not update_info.is_critical:
+            skip_btn = msg_box.addButton("Skip This Version", QMessageBox.ButtonRole.RejectRole)
+        
+        msg_box.setDefaultButton(QMessageBox.StandardButton.Yes)
+        
+        result = msg_box.exec()
+        
+        if result == QMessageBox.StandardButton.Yes:
+            self._download_update(update_info)
+        elif msg_box.clickedButton() == skip_btn if not update_info.is_critical else False:
+            AppConfig.set_skip_version(update_info.version)
+            logger.info(f"User skipped version {update_info.version}")
+    
+    def _show_update_dialog(self, update_info: UpdateInfo):
+        """Show detailed update dialog."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Update Available")
+        dialog.setMinimumWidth(500)
+        dialog.setMinimumHeight(400)
+        
+        layout = QVBoxLayout()
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Title
+        if update_info.is_critical:
+            title_label = QLabel(f"⚠️ Critical Update Available")
+            title_label.setStyleSheet("color: orange; font-weight: bold; font-size: 14pt;")
+        else:
+            title_label = QLabel(f"New Version Available: v{update_info.version}")
+            title_label.setStyleSheet("font-weight: bold; font-size: 14pt;")
+        
+        layout.addWidget(title_label)
+        
+        # Version info
+        version_info = QLabel(
+            f"Current version: {UpdateConfig.get_current_version()}\n"
+            f"New version: {update_info.version}"
+        )
+        layout.addWidget(version_info)
+        
+        # Release notes
+        notes_label = QLabel("Release Notes:")
+        notes_label.setStyleSheet("font-weight: bold;")
+        layout.addWidget(notes_label)
+        
+        notes_text = QTextEdit()
+        notes_text.setReadOnly(True)
+        notes_text.setPlainText(update_info.release_notes)
+        notes_text.setMaximumHeight(200)
+        layout.addWidget(notes_text)
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        
+        download_btn = QPushButton("Download Update")
+        download_btn.clicked.connect(lambda: self._download_update(update_info))
+        download_btn.clicked.connect(dialog.accept)
+        button_layout.addWidget(download_btn)
+        
+        if not update_info.is_critical:
+            skip_btn = QPushButton("Skip This Version")
+            skip_btn.clicked.connect(lambda: AppConfig.set_skip_version(update_info.version))
+            skip_btn.clicked.connect(dialog.accept)
+            button_layout.addWidget(skip_btn)
+        
+        later_btn = QPushButton("Remind Me Later")
+        later_btn.clicked.connect(dialog.reject)
+        button_layout.addWidget(later_btn)
+        
+        layout.addLayout(button_layout)
+        
+        dialog.setLayout(layout)
+        
+        # Apply current theme to dialog
+        if self.current_theme == "dark":
+            dialog.setStyleSheet("""
+                QDialog {
+                    background-color: #2b2b2b;
+                    color: #e0e0e0;
+                }
+                QTextEdit {
+                    background-color: #1e1e1e;
+                    color: #e0e0e0;
+                    border: 1px solid #3c3c3c;
+                }
+            """)
+        
+        dialog.exec()
+    
+    def _download_update(self, update_info: UpdateInfo):
+        """Open browser to download update."""
+        logger.info(f"Opening download URL: {update_info.download_url}")
+        try:
+            webbrowser.open(update_info.download_url)
+            QMessageBox.information(
+                self,
+                "Download Started",
+                "Your browser should open with the download page.\n\n"
+                "Please install the update and restart the application."
+            )
+        except Exception as e:
+            logger.error(f"Error opening download URL: {e}")
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"Could not open download page:\n{update_info.download_url}\n\n"
+                "Please visit the website manually."
+            )
     
     # -------------------------
     # Window Close Event

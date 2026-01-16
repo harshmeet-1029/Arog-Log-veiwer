@@ -112,9 +112,22 @@ class SSHConnectionManager:
                 # identity_file is a list in paramiko's SSH config
                 if isinstance(identity_file, list) and identity_file:
                     key_path = os.path.expanduser(identity_file[0])
+                    
+                    # If using custom SSH folder, also check there
+                    custom_ssh_folder = SSHConfig.get_ssh_folder()
+                    if not os.path.exists(key_path) and custom_ssh_folder:
+                        # Try to find the key in custom SSH folder
+                        key_basename = os.path.basename(key_path)
+                        custom_key_path = os.path.join(custom_ssh_folder, key_basename)
+                        if os.path.exists(custom_key_path):
+                            key_path = custom_key_path
+                            logger.debug(f"Using key from custom SSH folder: {key_path}")
+                    
                     if os.path.exists(key_path):
                         connect_kwargs["key_filename"] = key_path
                         logger.debug(f"Using identity file: {key_path}")
+                    else:
+                        logger.warning(f"Identity file not found: {key_path}")
             
             self.client.connect(**connect_kwargs)
             logger.info("✓ Successfully connected to jump host")
