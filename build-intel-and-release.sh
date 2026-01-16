@@ -223,21 +223,21 @@ if [ "$AUTO_UPLOAD" = true ]; then
 
     # Upload DMG
     echo "   Uploading DMG..."
-    curl -s -X POST \
+    curl --progress-bar -X POST \
       -H "Authorization: token $GITHUB_TOKEN" \
       -H "Content-Type: application/octet-stream" \
       --data-binary @"ArgoLogViewer-v${VERSION}-macOS-Intel.dmg" \
-      "https://uploads.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/$RELEASE_ID/assets?name=ArgoLogViewer-v${VERSION}-macOS-Intel.dmg" \
+      "https://uploads.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/$RELEASE_ID/assets?name=ArgoLogViewer-v${VERSION}-macOS-Intel.dmg"
 
     echo -e "${GREEN}   ✅ DMG uploaded${NC}"
 
     # Upload ZIP
     echo "   Uploading ZIP..."
-    curl -s -X POST \
+    curl --progress-bar -X POST \
       -H "Authorization: token $GITHUB_TOKEN" \
       -H "Content-Type: application/zip" \
       --data-binary @"ArgoLogViewer-v${VERSION}-macOS-Intel.zip" \
-      "https://uploads.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/$RELEASE_ID/assets?name=ArgoLogViewer-v${VERSION}-macOS-Intel.zip" \
+      "https://uploads.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/$RELEASE_ID/assets?name=ArgoLogViewer-v${VERSION}-macOS-Intel.zip"
 
     echo -e "${GREEN}   ✅ ZIP uploaded${NC}"
 
