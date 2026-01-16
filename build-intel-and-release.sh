@@ -223,23 +223,75 @@ if [ "$AUTO_UPLOAD" = true ]; then
 
     # Upload DMG
     echo "   Uploading DMG..."
-    curl --progress-bar -X POST \
+    DMG_FILE="ArgoLogViewer-v${VERSION}-macOS-Intel.dmg"
+    
+    # Check if file exists
+    if [ ! -f "$DMG_FILE" ]; then
+        echo -e "${RED}   ❌ ERROR: DMG file not found: $DMG_FILE${NC}"
+        exit 1
+    fi
+    
+    # Get file size for debugging
+    DMG_SIZE=$(du -h "$DMG_FILE" | cut -f1)
+    echo "   File size: $DMG_SIZE"
+    
+    # Upload with timeout and better error handling
+    HTTP_CODE=$(curl --max-time 600 --connect-timeout 30 \
+      --write-out "%{http_code}" \
+      --progress-bar \
+      -o /tmp/dmg_upload_response.json \
+      -X POST \
       -H "Authorization: token $GITHUB_TOKEN" \
       -H "Content-Type: application/octet-stream" \
-      --data-binary @"ArgoLogViewer-v${VERSION}-macOS-Intel.dmg" \
-      "https://uploads.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/$RELEASE_ID/assets?name=ArgoLogViewer-v${VERSION}-macOS-Intel.dmg"
-
-    echo -e "${GREEN}   ✅ DMG uploaded${NC}"
+      --data-binary @"$DMG_FILE" \
+      "https://uploads.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/$RELEASE_ID/assets?name=$DMG_FILE")
+    
+    if [ "$HTTP_CODE" -eq 201 ]; then
+        echo -e "${GREEN}   ✅ DMG uploaded successfully${NC}"
+    else
+        echo -e "${RED}   ❌ ERROR: DMG upload failed with HTTP code: $HTTP_CODE${NC}"
+        echo "   Response:"
+        cat /tmp/dmg_upload_response.json
+        rm -f /tmp/dmg_upload_response.json
+        exit 1
+    fi
+    rm -f /tmp/dmg_upload_response.json
 
     # Upload ZIP
     echo "   Uploading ZIP..."
-    curl --progress-bar -X POST \
+    ZIP_FILE="ArgoLogViewer-v${VERSION}-macOS-Intel.zip"
+    
+    # Check if file exists
+    if [ ! -f "$ZIP_FILE" ]; then
+        echo -e "${RED}   ❌ ERROR: ZIP file not found: $ZIP_FILE${NC}"
+        exit 1
+    fi
+    
+    # Get file size for debugging
+    ZIP_SIZE=$(du -h "$ZIP_FILE" | cut -f1)
+    echo "   File size: $ZIP_SIZE"
+    
+    # Upload with timeout and better error handling
+    HTTP_CODE=$(curl --max-time 600 --connect-timeout 30 \
+      --write-out "%{http_code}" \
+      --progress-bar \
+      -o /tmp/zip_upload_response.json \
+      -X POST \
       -H "Authorization: token $GITHUB_TOKEN" \
       -H "Content-Type: application/zip" \
-      --data-binary @"ArgoLogViewer-v${VERSION}-macOS-Intel.zip" \
-      "https://uploads.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/$RELEASE_ID/assets?name=ArgoLogViewer-v${VERSION}-macOS-Intel.zip"
-
-    echo -e "${GREEN}   ✅ ZIP uploaded${NC}"
+      --data-binary @"$ZIP_FILE" \
+      "https://uploads.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/$RELEASE_ID/assets?name=$ZIP_FILE")
+    
+    if [ "$HTTP_CODE" -eq 201 ]; then
+        echo -e "${GREEN}   ✅ ZIP uploaded successfully${NC}"
+    else
+        echo -e "${RED}   ❌ ERROR: ZIP upload failed with HTTP code: $HTTP_CODE${NC}"
+        echo "   Response:"
+        cat /tmp/zip_upload_response.json
+        rm -f /tmp/zip_upload_response.json
+        exit 1
+    fi
+    rm -f /tmp/zip_upload_response.json
 
     echo ""
     echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
