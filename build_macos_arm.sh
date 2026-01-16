@@ -1,15 +1,15 @@
 #!/bin/bash
-# Professional Build Script for macOS Intel
+# Professional Build Script for macOS Apple Silicon
 # Argo Log Viewer - Copyright (c) 2024-2026 Harshmeet Singh
-# For Intel-based Macs (x86_64)
+# For Apple Silicon Macs (ARM64 / M1, M2, M3)
 
 set -e
 
 echo "============================================================"
-echo "  Argo Log Viewer - Professional macOS Builder (Intel)"
+echo "  Argo Log Viewer - Professional macOS Builder (ARM64)"
 echo "============================================================"
 echo ""
-echo "Platform: macOS Intel (x86_64)"
+echo "Platform: macOS Apple Silicon (ARM64)"
 echo "Build Date: $(date '+%Y-%m-%d %H:%M:%S')"
 echo ""
 
@@ -21,10 +21,10 @@ fi
 
 # Verify architecture
 ARCH=$(uname -m)
-if [ "$ARCH" != "x86_64" ]; then
+if [ "$ARCH" != "arm64" ]; then
     echo "WARNING: Detected architecture: $ARCH"
-    echo "This script is optimized for Intel Macs (x86_64)"
-    echo "For Apple Silicon, use: build_macos_arm.sh"
+    echo "This script is optimized for Apple Silicon (arm64)"
+    echo "For Intel Macs, use: build_macos_intel.sh"
     read -p "Continue anyway? (y/n) " -n 1 -r
     echo
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
@@ -106,7 +106,8 @@ echo "[6/8] Building macOS application..."
 echo "This may take 3-5 minutes..."
 echo ""
 
-pyinstaller ArgoLogViewer.spec --clean
+# Build specifically for ARM64
+pyinstaller ArgoLogViewer.spec --clean --target-arch arm64
 
 # Verify build
 echo ""
@@ -133,13 +134,13 @@ ln -s /Applications dist/dmg/Applications
 hdiutil create -volname "Argo Log Viewer" \
     -srcfolder dist/dmg \
     -ov -format UDZO \
-    ArgoLogViewer-macOS-Intel.dmg
+    ArgoLogViewer-macOS-ARM64.dmg
 
 rm -rf dist/dmg
 
-if [ -f "ArgoLogViewer-macOS-Intel.dmg" ]; then
-    DMG_SIZE=$(du -sh ArgoLogViewer-macOS-Intel.dmg | cut -f1)
-    echo "✓ DMG created: ArgoLogViewer-macOS-Intel.dmg"
+if [ -f "ArgoLogViewer-macOS-ARM64.dmg" ]; then
+    DMG_SIZE=$(du -sh ArgoLogViewer-macOS-ARM64.dmg | cut -f1)
+    echo "✓ DMG created: ArgoLogViewer-macOS-ARM64.dmg"
     echo "  Size: $DMG_SIZE"
 fi
 
@@ -157,14 +158,14 @@ echo "  1. dist/ArgoLogViewer.app (Application Bundle)"
 echo "     Size: $APP_SIZE"
 echo "     Test: open dist/ArgoLogViewer.app"
 echo ""
-if [ -f "ArgoLogViewer-macOS-Intel.dmg" ]; then
-    echo "  2. ArgoLogViewer-macOS-Intel.dmg (Installer)"
+if [ -f "ArgoLogViewer-macOS-ARM64.dmg" ]; then
+    echo "  2. ArgoLogViewer-macOS-ARM64.dmg (Installer)"
     echo "     Size: $DMG_SIZE"
-    echo "     For distribution to Intel Mac users"
+    echo "     For distribution to Apple Silicon Mac users"
 fi
 echo ""
-echo "Architecture: Intel (x86_64)"
-echo "Compatible with: Intel-based Macs"
+echo "Architecture: ARM64 (Apple Silicon)"
+echo "Compatible with: M1, M2, M3 Macs"
 echo ""
 echo "Build Complete: $(date '+%Y-%m-%d %H:%M:%S')"
 echo "============================================================"

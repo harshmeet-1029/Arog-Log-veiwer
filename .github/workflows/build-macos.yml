@@ -38,6 +38,24 @@ jobs:
         pip install pyinstaller
         echo "✅ Dependencies installed"
     
+    - name: Create macOS icon (.icns)
+      run: |
+        echo "🎨 Creating .icns icon for macOS..."
+        mkdir -p app/icon.iconset
+        sips -z 16 16 app/ICON.png --out app/icon.iconset/icon_16x16.png
+        sips -z 32 32 app/ICON.png --out app/icon.iconset/icon_16x16@2x.png
+        sips -z 32 32 app/ICON.png --out app/icon.iconset/icon_32x32.png
+        sips -z 64 64 app/ICON.png --out app/icon.iconset/icon_32x32@2x.png
+        sips -z 128 128 app/ICON.png --out app/icon.iconset/icon_128x128.png
+        sips -z 256 256 app/ICON.png --out app/icon.iconset/icon_128x128@2x.png
+        sips -z 256 256 app/ICON.png --out app/icon.iconset/icon_256x256.png
+        sips -z 512 512 app/ICON.png --out app/icon.iconset/icon_256x256@2x.png
+        sips -z 512 512 app/ICON.png --out app/icon.iconset/icon_512x512.png
+        sips -z 1024 1024 app/ICON.png --out app/icon.iconset/icon_512x512@2x.png
+        iconutil -c icns app/icon.iconset -o app/icon.icns
+        rm -rf app/icon.iconset
+        echo "✅ Icon created: app/icon.icns"
+    
     - name: Build macOS Intel app
       run: |
         export MACOSX_DEPLOYMENT_TARGET=11.0
@@ -47,6 +65,7 @@ jobs:
         python -m PyInstaller --name="ArgoLogViewer" \
           --windowed \
           --onefile \
+          --icon="app/icon.icns" \
           --add-data="app:app" \
           --hidden-import=PySide6 \
           --hidden-import=paramiko \
@@ -144,6 +163,24 @@ jobs:
         pip install pyinstaller
         echo "✅ Dependencies installed"
     
+    - name: Create macOS icon (.icns)
+      run: |
+        echo "🎨 Creating .icns icon for macOS..."
+        mkdir -p app/icon.iconset
+        sips -z 16 16 app/ICON.png --out app/icon.iconset/icon_16x16.png
+        sips -z 32 32 app/ICON.png --out app/icon.iconset/icon_16x16@2x.png
+        sips -z 32 32 app/ICON.png --out app/icon.iconset/icon_32x32.png
+        sips -z 64 64 app/ICON.png --out app/icon.iconset/icon_32x32@2x.png
+        sips -z 128 128 app/ICON.png --out app/icon.iconset/icon_128x128.png
+        sips -z 256 256 app/ICON.png --out app/icon.iconset/icon_128x128@2x.png
+        sips -z 256 256 app/ICON.png --out app/icon.iconset/icon_256x256.png
+        sips -z 512 512 app/ICON.png --out app/icon.iconset/icon_256x256@2x.png
+        sips -z 512 512 app/ICON.png --out app/icon.iconset/icon_512x512.png
+        sips -z 1024 1024 app/ICON.png --out app/icon.iconset/icon_512x512@2x.png
+        iconutil -c icns app/icon.iconset -o app/icon.icns
+        rm -rf app/icon.iconset
+        echo "✅ Icon created: app/icon.icns"
+    
     - name: Build macOS Apple Silicon app
       run: |
         export MACOSX_DEPLOYMENT_TARGET=11.0
@@ -153,6 +190,7 @@ jobs:
         python -m PyInstaller --name="ArgoLogViewer" \
           --windowed \
           --onefile \
+          --icon="app/icon.icns" \
           --add-data="app:app" \
           --hidden-import=PySide6 \
           --hidden-import=paramiko \

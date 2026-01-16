@@ -56,30 +56,57 @@ python -m app.main
 
 ### Build Executable
 
+**macOS Intel:**
+```bash
+chmod +x build_macos_intel.sh
+./build_macos_intel.sh
+# Output: ArgoLogViewer-macOS-Intel.dmg
+```
+
+**macOS Apple Silicon (M1/M2/M3):**
+```bash
+chmod +x build_macos_arm.sh
+./build_macos_arm.sh
+# Output: ArgoLogViewer-macOS-ARM64.dmg
+```
+
+**Linux:**
+```bash
+chmod +x build_linux.sh
+./build_linux.sh
+# Output: ArgoLogViewer-Linux-x86_64.tar.gz
+```
+
 **Windows:**
 ```bash
-pip install pyinstaller
-pyinstaller ArgoLogViewer.spec
+build_windows.bat
 # Output: dist\ArgoLogViewer.exe
 ```
 
-**macOS:**
+**Automated (All Platforms via GitHub Actions):**
 ```bash
-# First, create icon
-chmod +x create_macos_icon.sh
-./create_macos_icon.sh
+# MANUAL TRIGGER ONLY - Go to GitHub Actions UI
 
-# Then build
-pip install pyinstaller
-pyinstaller ArgoLogViewer.spec
-# Output: dist/ArgoLogViewer.app
+# 1. Go to: https://github.com/harshmeet-1029/Arog-Log-veiwer/actions
+# 2. Click "Build All Platforms" workflow (left side)
+# 3. Click "Run workflow" button (top right, green dropdown)
+# 4. Fill in the form:
+#    - Version number: 1.0.0 (without 'v' prefix)
+#    - Create GitHub Release: ✓ Yes (or uncheck for test builds)
+# 5. Click "Run workflow" (green button)
+# 6. Wait 15-20 minutes
 
-# Or use the all-in-one script:
-chmod +x build_macos_intel.sh
-./build_macos_intel.sh
+# Output:
+# - Windows: ArgoLogViewer-v1.0.0-Windows.exe
+# - macOS Intel: ArgoLogViewer-v1.0.0-macOS-Intel.dmg + .zip
+# - macOS ARM64: ArgoLogViewer-v1.0.0-macOS-AppleSilicon.dmg + .zip
+# - Linux: ArgoLogViewer-v1.0.0-Linux (binary)
+# - Checksums: CHECKSUMS.txt
+
+# If "Create GitHub Release" was checked:
+# All files will be uploaded to: 
+# https://github.com/harshmeet-1029/Arog-Log-veiwer/releases
 ```
-
-**See [BUILD_MACOS.md](BUILD_MACOS.md) for detailed macOS instructions.**
 
 ---
 
@@ -190,15 +217,20 @@ git add app/config.py
 git commit -m "Bump version to 1.1.0"
 git push
 
-# 3. Create and push tag
-git tag v1.1.0
-git push origin v1.1.0
+# 3. Go to GitHub Actions and trigger build manually
+# https://github.com/harshmeet-1029/Arog-Log-veiwer/actions
+# Click "Build All Platforms" → "Run workflow"
+# Enter version: 1.1.0
+# Check "Create GitHub Release"
+# Click "Run workflow"
 
 # 4. Done! GitHub Actions will:
-#    - Build ArgoLogViewer.exe (5-10 minutes)
-#    - Create release
-#    - Upload file
-#    Check: https://github.com/harshmeet-1029/Arog-Log-veiwer/actions
+#    - Build Windows .exe (5-7 min)
+#    - Build macOS Intel .dmg + .zip (8-10 min)
+#    - Build macOS Apple Silicon .dmg + .zip (8-10 min)
+#    - Build Linux binary (5-7 min)
+#    - Create release with all files
+#    Check progress: https://github.com/harshmeet-1029/Arog-Log-veiwer/actions
 ```
 
 ### Manual (If needed)
@@ -346,10 +378,19 @@ rm ~/.argo-log-viewer/config.json
 
 **Problem:** GitHub Actions failed
 ```bash
-# Check workflow
+# Check workflow status:
 # https://github.com/harshmeet-1029/Arog-Log-veiwer/actions
 
 # Common issues:
+# - Icon files missing (ICON.png for Windows, converts to .icns for macOS)
+# - Dependencies not installed (check requirements.txt)
+# - PyInstaller version mismatch
+# - GitHub Actions runners out of quota (check billing)
+# - Build script syntax errors (check build_*.sh and build_windows.bat)
+
+# View detailed logs:
+# Click on failed job → Click on failed step → Read error message
+```
 # - Missing dependencies → Update requirements.txt
 # - Build errors → Check pyinstaller spec file
 # - Tag format wrong → Use v1.0.0 format
@@ -567,13 +608,16 @@ Connect using custom credentials
 ### Release Checklist
 
 - [ ] Update `CURRENT_VERSION` in `app/config.py`
-- [ ] Commit changes
-- [ ] Push to GitHub
-- [ ] Create tag: `git tag v1.X.X`
-- [ ] Push tag: `git push origin v1.X.X`
-- [ ] Wait for GitHub Actions (5-10 min)
-- [ ] Check release page
-- [ ] Test download link
+- [ ] Commit and push changes
+- [ ] Go to GitHub Actions: https://github.com/harshmeet-1029/Arog-Log-veiwer/actions
+- [ ] Click "Build All Platforms" workflow
+- [ ] Click "Run workflow" button
+- [ ] Enter version (e.g., 1.2.0)
+- [ ] Check "Create GitHub Release" (or uncheck for test builds)
+- [ ] Click "Run workflow"
+- [ ] Wait for GitHub Actions (15-20 min for all platforms)
+- [ ] Check release page for all 4 platform builds
+- [ ] Test download links (Windows, macOS Intel, macOS ARM, Linux)
 
 ### Important Links
 
