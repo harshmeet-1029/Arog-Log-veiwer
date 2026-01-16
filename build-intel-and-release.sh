@@ -235,27 +235,41 @@ if [ "$AUTO_UPLOAD" = true ]; then
     DMG_SIZE=$(du -h "$DMG_FILE" | cut -f1)
     echo "   File size: $DMG_SIZE"
     
-    # Upload with timeout and better error handling
-    HTTP_CODE=$(curl --max-time 600 --connect-timeout 30 \
-      --write-out "%{http_code}" \
-      --progress-bar \
-      -o /tmp/dmg_upload_response.json \
-      -X POST \
-      -H "Authorization: token $GITHUB_TOKEN" \
-      -H "Content-Type: application/octet-stream" \
-      --data-binary @"$DMG_FILE" \
-      "https://uploads.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/$RELEASE_ID/assets?name=$DMG_FILE")
-    
-    if [ "$HTTP_CODE" -eq 201 ]; then
-        echo -e "${GREEN}   ✅ DMG uploaded successfully${NC}"
-    else
-        echo -e "${RED}   ❌ ERROR: DMG upload failed with HTTP code: $HTTP_CODE${NC}"
-        echo "   Response:"
-        cat /tmp/dmg_upload_response.json
-        rm -f /tmp/dmg_upload_response.json
-        exit 1
-    fi
-    rm -f /tmp/dmg_upload_response.json
+    # Upload with retry logic (3 attempts)
+    UPLOAD_SUCCESS=false
+    for attempt in 1 2 3; do
+        if [ $attempt -gt 1 ]; then
+            echo "   Retry attempt $attempt of 3..."
+        fi
+        
+        HTTP_CODE=$(curl --max-time 0 --connect-timeout 60 \
+          --write-out "%{http_code}" \
+          --progress-bar \
+          -o /tmp/dmg_upload_response.json \
+          -X POST \
+          -H "Authorization: token $GITHUB_TOKEN" \
+          -H "Content-Type: application/octet-stream" \
+          --data-binary @"$DMG_FILE" \
+          "https://uploads.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/$RELEASE_ID/assets?name=$DMG_FILE" 2>&1)
+        
+        if [ "$HTTP_CODE" -eq 201 ]; then
+            echo -e "${GREEN}   ✅ DMG uploaded successfully${NC}"
+            UPLOAD_SUCCESS=true
+            rm -f /tmp/dmg_upload_response.json
+            break
+        else
+            echo -e "${YELLOW}   ⚠️  Upload failed with HTTP code: $HTTP_CODE${NC}"
+            if [ -f /tmp/dmg_upload_response.json ]; then
+                cat /tmp/dmg_upload_response.json
+            fi
+            if [ $attempt -eq 3 ]; then
+                echo -e "${RED}   ❌ ERROR: DMG upload failed after 3 attempts${NC}"
+                rm -f /tmp/dmg_upload_response.json
+                exit 1
+            fi
+            sleep 5
+        fi
+    done
 
     # Upload ZIP
     echo "   Uploading ZIP..."
@@ -271,27 +285,41 @@ if [ "$AUTO_UPLOAD" = true ]; then
     ZIP_SIZE=$(du -h "$ZIP_FILE" | cut -f1)
     echo "   File size: $ZIP_SIZE"
     
-    # Upload with timeout and better error handling
-    HTTP_CODE=$(curl --max-time 600 --connect-timeout 30 \
-      --write-out "%{http_code}" \
-      --progress-bar \
-      -o /tmp/zip_upload_response.json \
-      -X POST \
-      -H "Authorization: token $GITHUB_TOKEN" \
-      -H "Content-Type: application/zip" \
-      --data-binary @"$ZIP_FILE" \
-      "https://uploads.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/$RELEASE_ID/assets?name=$ZIP_FILE")
-    
-    if [ "$HTTP_CODE" -eq 201 ]; then
-        echo -e "${GREEN}   ✅ ZIP uploaded successfully${NC}"
-    else
-        echo -e "${RED}   ❌ ERROR: ZIP upload failed with HTTP code: $HTTP_CODE${NC}"
-        echo "   Response:"
-        cat /tmp/zip_upload_response.json
-        rm -f /tmp/zip_upload_response.json
-        exit 1
-    fi
-    rm -f /tmp/zip_upload_response.json
+    # Upload with retry logic (3 attempts)
+    UPLOAD_SUCCESS=false
+    for attempt in 1 2 3; do
+        if [ $attempt -gt 1 ]; then
+            echo "   Retry attempt $attempt of 3..."
+        fi
+        
+        HTTP_CODE=$(curl --max-time 0 --connect-timeout 60 \
+          --write-out "%{http_code}" \
+          --progress-bar \
+          -o /tmp/zip_upload_response.json \
+          -X POST \
+          -H "Authorization: token $GITHUB_TOKEN" \
+          -H "Content-Type: application/zip" \
+          --data-binary @"$ZIP_FILE" \
+          "https://uploads.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/$RELEASE_ID/assets?name=$ZIP_FILE" 2>&1)
+        
+        if [ "$HTTP_CODE" -eq 201 ]; then
+            echo -e "${GREEN}   ✅ ZIP uploaded successfully${NC}"
+            UPLOAD_SUCCESS=true
+            rm -f /tmp/zip_upload_response.json
+            break
+        else
+            echo -e "${YELLOW}   ⚠️  Upload failed with HTTP code: $HTTP_CODE${NC}"
+            if [ -f /tmp/zip_upload_response.json ]; then
+                cat /tmp/zip_upload_response.json
+            fi
+            if [ $attempt -eq 3 ]; then
+                echo -e "${RED}   ❌ ERROR: ZIP upload failed after 3 attempts${NC}"
+                rm -f /tmp/zip_upload_response.json
+                exit 1
+            fi
+            sleep 5
+        fi
+    done
 
     echo ""
     echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
