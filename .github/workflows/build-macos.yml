@@ -19,7 +19,7 @@ permissions:
 jobs:
   build-macos-intel:
     # Build Intel-only (x86_64) binary
-    runs-on: macos-14   # Intel runner
+    runs-on: macos-13   # Intel runner (macos-14+ are ARM64)
     
     steps:
     - name: Checkout code
