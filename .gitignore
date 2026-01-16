@@ -41,6 +41,14 @@ logs/*.log
 *.sqlite
 *.sqlite3
 
+# Build artifacts
+*.dmg
+*.zip
+checksums*.txt
+*.spec
+app/icon.icns
+app/icon.iconset/
+
 # OS
 Thumbs.db
 desktop.ini
