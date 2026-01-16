@@ -101,24 +101,14 @@ else
 fi
 source venv/bin/activate
 echo "   Installing dependencies..."
-pip install -r requirements.txt > /dev/null 2>&1
+pip install -r requirements.txt
 echo -e "${GREEN}   ✅ Venv activated and dependencies installed${NC}"
 echo ""
 
 # Create macOS icon
 echo -e "${BLUE}🎨 Creating macOS icon (.icns)...${NC}"
 mkdir -p app/icon.iconset
-sips -z 16 16 app/ICON.png --out app/icon.iconset/icon_16x16.png > /dev/null 2>&1
-sips -z 32 32 app/ICON.png --out app/icon.iconset/icon_16x16@2x.png > /dev/null 2>&1
-sips -z 32 32 app/ICON.png --out app/icon.iconset/icon_32x32.png > /dev/null 2>&1
-sips -z 64 64 app/ICON.png --out app/icon.iconset/icon_32x32@2x.png > /dev/null 2>&1
-sips -z 128 128 app/ICON.png --out app/icon.iconset/icon_128x128.png > /dev/null 2>&1
-sips -z 256 256 app/ICON.png --out app/icon.iconset/icon_128x128@2x.png > /dev/null 2>&1
-sips -z 256 256 app/ICON.png --out app/icon.iconset/icon_256x256.png > /dev/null 2>&1
-sips -z 512 512 app/ICON.png --out app/icon.iconset/icon_256x256@2x.png > /dev/null 2>&1
-sips -z 512 512 app/ICON.png --out app/icon.iconset/icon_512x512.png > /dev/null 2>&1
-sips -z 1024 1024 app/ICON.png --out app/icon.iconset/icon_512x512@2x.png > /dev/null 2>&1
-iconutil -c icns app/icon.iconset -o app/icon.icns
+sips -z 16 16 app/ICON.png --out app/icon.iconset/icon_16x16.pngsips -z 32 32 app/ICON.png --out app/icon.iconset/icon_16x16@2x.pngsips -z 32 32 app/ICON.png --out app/icon.iconset/icon_32x32.pngsips -z 64 64 app/ICON.png --out app/icon.iconset/icon_32x32@2x.pngsips -z 128 128 app/ICON.png --out app/icon.iconset/icon_128x128.pngsips -z 256 256 app/ICON.png --out app/icon.iconset/icon_128x128@2x.pngsips -z 256 256 app/ICON.png --out app/icon.iconset/icon_256x256.pngsips -z 512 512 app/ICON.png --out app/icon.iconset/icon_256x256@2x.pngsips -z 512 512 app/ICON.png --out app/icon.iconset/icon_512x512.pngsips -z 1024 1024 app/ICON.png --out app/icon.iconset/icon_512x512@2x.pngiconutil -c icns app/icon.iconset -o app/icon.icns
 rm -rf app/icon.iconset
 echo -e "${GREEN}   ✅ Icon created: app/icon.icns${NC}"
 echo ""
@@ -175,8 +165,7 @@ ln -s /Applications dist/dmg/Applications
 hdiutil create -volname "Argo Log Viewer (Intel)" \
   -srcfolder dist/dmg \
   -ov -format UDZO \
-  "ArgoLogViewer-v${VERSION}-macOS-Intel.dmg" > /dev/null 2>&1
-rm -rf dist/dmg
+  "ArgoLogViewer-v${VERSION}-macOS-Intel.dmg"rm -rf dist/dmg
 echo -e "${GREEN}   ✅ DMG created${NC}"
 echo ""
 
@@ -228,7 +217,6 @@ if [ "$AUTO_UPLOAD" = true ]; then
       -H "Content-Type: application/octet-stream" \
       --data-binary @"ArgoLogViewer-v${VERSION}-macOS-Intel.dmg" \
       "https://uploads.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/$RELEASE_ID/assets?name=ArgoLogViewer-v${VERSION}-macOS-Intel.dmg" \
-      > /dev/null
 
     echo -e "${GREEN}   ✅ DMG uploaded${NC}"
 
@@ -239,7 +227,6 @@ if [ "$AUTO_UPLOAD" = true ]; then
       -H "Content-Type: application/zip" \
       --data-binary @"ArgoLogViewer-v${VERSION}-macOS-Intel.zip" \
       "https://uploads.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/$RELEASE_ID/assets?name=ArgoLogViewer-v${VERSION}-macOS-Intel.zip" \
-      > /dev/null
 
     echo -e "${GREEN}   ✅ ZIP uploaded${NC}"
 
