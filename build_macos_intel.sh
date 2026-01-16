@@ -61,9 +61,9 @@ source venv/bin/activate
 # Install dependencies
 echo ""
 echo "[3/8] Installing dependencies..."
-pip install --upgrade pip --quiet
-pip install -r requirements.txt --quiet
-pip install pyinstaller --quiet
+pip install --upgrade pip
+pip install -r requirements.txt
+pip install pyinstaller
 echo "✓ All dependencies installed"
 
 # Create macOS icon
