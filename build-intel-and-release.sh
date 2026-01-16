@@ -108,7 +108,17 @@ echo ""
 # Create macOS icon
 echo -e "${BLUE}🎨 Creating macOS icon (.icns)...${NC}"
 mkdir -p app/icon.iconset
-sips -z 16 16 app/ICON.png --out app/icon.iconset/icon_16x16.pngsips -z 32 32 app/ICON.png --out app/icon.iconset/icon_16x16@2x.pngsips -z 32 32 app/ICON.png --out app/icon.iconset/icon_32x32.pngsips -z 64 64 app/ICON.png --out app/icon.iconset/icon_32x32@2x.pngsips -z 128 128 app/ICON.png --out app/icon.iconset/icon_128x128.pngsips -z 256 256 app/ICON.png --out app/icon.iconset/icon_128x128@2x.pngsips -z 256 256 app/ICON.png --out app/icon.iconset/icon_256x256.pngsips -z 512 512 app/ICON.png --out app/icon.iconset/icon_256x256@2x.pngsips -z 512 512 app/ICON.png --out app/icon.iconset/icon_512x512.pngsips -z 1024 1024 app/ICON.png --out app/icon.iconset/icon_512x512@2x.pngiconutil -c icns app/icon.iconset -o app/icon.icns
+sips -z 16 16 app/ICON.png --out app/icon.iconset/icon_16x16.png
+sips -z 32 32 app/ICON.png --out app/icon.iconset/icon_16x16@2x.png
+sips -z 32 32 app/ICON.png --out app/icon.iconset/icon_32x32.png
+sips -z 64 64 app/ICON.png --out app/icon.iconset/icon_32x32@2x.png
+sips -z 128 128 app/ICON.png --out app/icon.iconset/icon_128x128.png
+sips -z 256 256 app/ICON.png --out app/icon.iconset/icon_128x128@2x.png
+sips -z 256 256 app/ICON.png --out app/icon.iconset/icon_256x256.png
+sips -z 512 512 app/ICON.png --out app/icon.iconset/icon_256x256@2x.png
+sips -z 512 512 app/ICON.png --out app/icon.iconset/icon_512x512.png
+sips -z 1024 1024 app/ICON.png --out app/icon.iconset/icon_512x512@2x.png
+iconutil -c icns app/icon.iconset -o app/icon.icns
 rm -rf app/icon.iconset
 echo -e "${GREEN}   ✅ Icon created: app/icon.icns${NC}"
 echo ""
@@ -165,7 +175,8 @@ ln -s /Applications dist/dmg/Applications
 hdiutil create -volname "Argo Log Viewer (Intel)" \
   -srcfolder dist/dmg \
   -ov -format UDZO \
-  "ArgoLogViewer-v${VERSION}-macOS-Intel.dmg"rm -rf dist/dmg
+  "ArgoLogViewer-v${VERSION}-macOS-Intel.dmg"
+rm -rf dist/dmg
 echo -e "${GREEN}   ✅ DMG created${NC}"
 echo ""
 
