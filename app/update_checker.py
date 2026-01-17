@@ -131,20 +131,10 @@ class UpdateChecker:
                 version_str = data['tag_name'].lstrip('v')  # Remove 'v' prefix if present
                 download_url = None
                 
-                # Find appropriate asset for current platform
-                if 'assets' in data and data['assets']:
-                    import platform
-                    system = platform.system().lower()
-                    
-                    for asset in data['assets']:
-                        name = asset.get('name', '').lower()
-                        if system in name or (system == 'windows' and '.exe' in name):
-                            download_url = asset.get('browser_download_url')
-                            break
-                    
-                    # If no platform-specific asset, use first one
-                    if not download_url and data['assets']:
-                        download_url = data['assets'][0].get('browser_download_url')
+                # Use the GitHub release page URL instead of direct download
+                # This allows users to choose their platform manually
+                if 'html_url' in data:
+                    download_url = data['html_url']  # GitHub releases page
                 
                 release_notes = data.get('body', 'No release notes available')
                 is_critical = 'critical' in data.get('name', '').lower() or 'security' in release_notes.lower()

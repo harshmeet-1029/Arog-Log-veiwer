@@ -2287,23 +2287,27 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
         dialog.exec()
     
     def _download_update(self, update_info: UpdateInfo):
-        """Open browser to download update."""
-        logger.info(f"Opening download URL: {update_info.download_url}")
+        """Open browser to GitHub releases page."""
+        logger.info(f"Opening GitHub releases page: {update_info.download_url}")
         try:
             webbrowser.open(update_info.download_url)
             QMessageBox.information(
                 self,
-                "Download Started",
-                "Your browser should open with the download page.\n\n"
-                "Please install the update and restart the application."
+                "Opening Releases Page",
+                "Your browser will open the GitHub releases page.\n\n"
+                "Please download the correct version for your platform:\n"
+                "• Windows: .exe file\n"
+                "• macOS: .dmg or .zip file\n"
+                "• Linux: Linux binary\n\n"
+                "After downloading, install and restart the application."
             )
         except Exception as e:
-            logger.error(f"Error opening download URL: {e}")
+            logger.error(f"Error opening releases page: {e}")
             QMessageBox.critical(
                 self,
                 "Error",
-                f"Could not open download page:\n{update_info.download_url}\n\n"
-                "Please visit the website manually."
+                f"Could not open releases page:\n{update_info.download_url}\n\n"
+                "Please visit GitHub manually to download the update."
             )
     
     # -------------------------
