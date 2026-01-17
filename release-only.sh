@@ -182,82 +182,63 @@ echo ""
 
 # Upload function with retry logic
 upload_file() {
-    local file=$1
+    local file="$1"
     local filename=$(basename "$file")
-    
+
     if [ ! -f "$file" ]; then
         echo -e "${YELLOW}   ⚠️  Skipping $filename (file not found)${NC}"
         return 0
     fi
-    
+
     echo -e "${CYAN}📤 Uploading: $filename${NC}"
-    
-    # Detect content type
+
     case "${filename##*.}" in
-        dmg)  CONTENT_TYPE="application/x-apple-diskimage" ;;
-        zip)  CONTENT_TYPE="application/zip" ;;
-        exe)  CONTENT_TYPE="application/x-msdownload" ;;
-        gz)   CONTENT_TYPE="application/gzip" ;;
-        tar)  CONTENT_TYPE="application/x-tar" ;;
-        txt)  CONTENT_TYPE="text/plain" ;;
-        *)    CONTENT_TYPE="application/octet-stream" ;;
+        dmg) CONTENT_TYPE="application/x-apple-diskimage" ;;
+        zip) CONTENT_TYPE="application/zip" ;;
+        txt) CONTENT_TYPE="text/plain" ;;
+        *)   CONTENT_TYPE="application/octet-stream" ;;
     esac
-    
-    # Get file size
-    FILE_SIZE=$(du -h "$file" | cut -f1)
-    echo "   Size: $FILE_SIZE"
+
+    FILE_BYTES=$(stat -f%z "$file")
+    echo "   Size: $(numfmt --to=iec $FILE_BYTES)"
     echo "   Type: $CONTENT_TYPE"
-    
-    # Check if asset already exists and delete it
+
     echo "   Checking for existing asset..."
-    EXISTING_ASSET_ID=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+    EXISTING_ASSET_ID=$(curl -s \
+      -H "Authorization: Bearer $GITHUB_TOKEN" \
       "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/$RELEASE_ID/assets" \
-      | grep -A 3 "\"name\": \"$filename\"" | grep '"id":' | head -1 | sed 's/[^0-9]*//g')
-    
+      | grep -A3 "\"name\": \"$filename\"" | grep '"id":' | sed 's/[^0-9]*//g')
+
     if [ -n "$EXISTING_ASSET_ID" ]; then
-        echo "   Deleting existing asset (ID: $EXISTING_ASSET_ID)..."
+        echo "   Deleting existing asset..."
         curl -s -X DELETE \
-          -H "Authorization: token $GITHUB_TOKEN" \
+          -H "Authorization: Bearer $GITHUB_TOKEN" \
           "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/assets/$EXISTING_ASSET_ID" \
-          > /dev/null
-        echo "   ✓ Existing asset deleted"
+          >/dev/null
     fi
-    
-    # Upload with retry logic (3 attempts)
-    for attempt in 1 2 3; do
-        if [ $attempt -gt 1 ]; then
-            echo "   Retry attempt $attempt of 3..."
-        fi
-        
-        HTTP_CODE=$(curl --max-time 0 --connect-timeout 60 \
-          --write-out "%{http_code}" \
-          --progress-bar \
-          -o /tmp/upload_response.json \
-          -X POST \
-          -H "Authorization: token $GITHUB_TOKEN" \
-          -H "Content-Type: $CONTENT_TYPE" \
-          --data-binary @"$file" \
-          "https://uploads.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/$RELEASE_ID/assets?name=$filename")
-        
-        if [ "$HTTP_CODE" -eq 201 ]; then
-            echo -e "${GREEN}   ✅ $filename uploaded successfully${NC}"
-            rm -f /tmp/upload_response.json
-            return 0
-        else
-            echo -e "${YELLOW}   ⚠️  Upload failed with HTTP code: $HTTP_CODE${NC}"
-            if [ -f /tmp/upload_response.json ]; then
-                echo "   Response:"
-                cat /tmp/upload_response.json | head -5
-            fi
-            if [ $attempt -eq 3 ]; then
-                echo -e "${RED}   ❌ ERROR: Upload failed after 3 attempts${NC}"
-                rm -f /tmp/upload_response.json
-                return 1
-            fi
-            sleep 5
-        fi
-    done
+
+    HTTP_CODE=$(curl -L --http1.1 \
+      --connect-timeout 60 \
+      --max-time 0 \
+      --progress-bar \
+      --write-out "%{http_code}" \
+      -o /tmp/upload_response.json \
+      -X POST \
+      -H "Authorization: Bearer $GITHUB_TOKEN" \
+      -H "Content-Type: $CONTENT_TYPE" \
+      -H "Content-Length: $FILE_BYTES" \
+      --data-binary @"$file" \
+      "https://uploads.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/$RELEASE_ID/assets?name=$filename")
+
+    if [ "$HTTP_CODE" -ne 201 ]; then
+        echo -e "${RED}❌ Upload failed (HTTP $HTTP_CODE)${NC}"
+        cat /tmp/upload_response.json
+        return 1
+    fi
+
+    echo -e "${GREEN}✅ Uploaded successfully${NC}"
 }
+
 
 # Upload all files
 echo -e "${CYAN}🚀 Starting uploads...${NC}"

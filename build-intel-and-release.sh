@@ -196,6 +196,41 @@ cat checksums-intel.txt
 echo -e "${GREEN}   ✅ Checksums generated${NC}"
 echo ""
 
+# ---------------------------------------------
+# Fast GitHub upload helper (GUI-like speed)
+# ---------------------------------------------
+upload_asset() {
+    local file="$1"
+    local content_type="$2"
+    local filename
+    filename=$(basename "$file")
+
+    FILE_BYTES=$(stat -f%z "$file")
+
+    echo -e "${CYAN}📤 Uploading: $filename ($(numfmt --to=iec $FILE_BYTES))${NC}"
+
+    HTTP_CODE=$(curl -L --http1.1 \
+      --connect-timeout 60 \
+      --max-time 0 \
+      --progress-bar \
+      --write-out "%{http_code}" \
+      -o /tmp/upload_response.json \
+      -X POST \
+      -H "Authorization: Bearer $GITHUB_TOKEN" \
+      -H "Content-Type: $content_type" \
+      -H "Content-Length: $FILE_BYTES" \
+      --data-binary @"$file" \
+      "https://uploads.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/$RELEASE_ID/assets?name=$filename")
+
+    if [ "$HTTP_CODE" -ne 201 ]; then
+        echo -e "${RED}❌ Upload failed (HTTP $HTTP_CODE)${NC}"
+        cat /tmp/upload_response.json
+        exit 1
+    fi
+
+    echo -e "${GREEN}✅ Uploaded successfully${NC}"
+}
+
 # Upload to GitHub Release (if token provided)
 if [ "$AUTO_UPLOAD" = true ]; then
     echo -e "${BLUE}🚀 Uploading to GitHub Release...${NC}"
@@ -222,104 +257,14 @@ if [ "$AUTO_UPLOAD" = true ]; then
     echo ""
 
     # Upload DMG
-    echo "   Uploading DMG..."
     DMG_FILE="ArgoLogViewer-v${VERSION}-macOS-Intel.dmg"
-    
-    # Check if file exists
-    if [ ! -f "$DMG_FILE" ]; then
-        echo -e "${RED}   ❌ ERROR: DMG file not found: $DMG_FILE${NC}"
-        exit 1
-    fi
-    
-    # Get file size for debugging
-    DMG_SIZE=$(du -h "$DMG_FILE" | cut -f1)
-    echo "   File size: $DMG_SIZE"
-    
-    # Upload with retry logic (3 attempts)
-    UPLOAD_SUCCESS=false
-    for attempt in 1 2 3; do
-        if [ $attempt -gt 1 ]; then
-            echo "   Retry attempt $attempt of 3..."
-        fi
-        
-        HTTP_CODE=$(curl --max-time 0 --connect-timeout 60 \
-          --write-out "%{http_code}" \
-          --progress-bar \
-          -o /tmp/dmg_upload_response.json \
-          -X POST \
-          -H "Authorization: token $GITHUB_TOKEN" \
-          -H "Content-Type: application/octet-stream" \
-          --data-binary @"$DMG_FILE" \
-          "https://uploads.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/$RELEASE_ID/assets?name=$DMG_FILE")
-        
-        if [ "$HTTP_CODE" -eq 201 ]; then
-            echo -e "${GREEN}   ✅ DMG uploaded successfully${NC}"
-            UPLOAD_SUCCESS=true
-            rm -f /tmp/dmg_upload_response.json
-            break
-        else
-            echo -e "${YELLOW}   ⚠️  Upload failed with HTTP code: $HTTP_CODE${NC}"
-            if [ -f /tmp/dmg_upload_response.json ]; then
-                cat /tmp/dmg_upload_response.json
-            fi
-            if [ $attempt -eq 3 ]; then
-                echo -e "${RED}   ❌ ERROR: DMG upload failed after 3 attempts${NC}"
-                rm -f /tmp/dmg_upload_response.json
-                exit 1
-            fi
-            sleep 5
-        fi
-    done
-
-    # Upload ZIP
-    echo "   Uploading ZIP..."
     ZIP_FILE="ArgoLogViewer-v${VERSION}-macOS-Intel.zip"
-    
-    # Check if file exists
-    if [ ! -f "$ZIP_FILE" ]; then
-        echo -e "${RED}   ❌ ERROR: ZIP file not found: $ZIP_FILE${NC}"
-        exit 1
-    fi
-    
-    # Get file size for debugging
-    ZIP_SIZE=$(du -h "$ZIP_FILE" | cut -f1)
-    echo "   File size: $ZIP_SIZE"
-    
-    # Upload with retry logic (3 attempts)
-    UPLOAD_SUCCESS=false
-    for attempt in 1 2 3; do
-        if [ $attempt -gt 1 ]; then
-            echo "   Retry attempt $attempt of 3..."
-        fi
-        
-        HTTP_CODE=$(curl --max-time 0 --connect-timeout 60 \
-          --write-out "%{http_code}" \
-          --progress-bar \
-          -o /tmp/zip_upload_response.json \
-          -X POST \
-          -H "Authorization: token $GITHUB_TOKEN" \
-          -H "Content-Type: application/zip" \
-          --data-binary @"$ZIP_FILE" \
-          "https://uploads.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/$RELEASE_ID/assets?name=$ZIP_FILE")
-        
-        if [ "$HTTP_CODE" -eq 201 ]; then
-            echo -e "${GREEN}   ✅ ZIP uploaded successfully${NC}"
-            UPLOAD_SUCCESS=true
-            rm -f /tmp/zip_upload_response.json
-            break
-        else
-            echo -e "${YELLOW}   ⚠️  Upload failed with HTTP code: $HTTP_CODE${NC}"
-            if [ -f /tmp/zip_upload_response.json ]; then
-                cat /tmp/zip_upload_response.json
-            fi
-            if [ $attempt -eq 3 ]; then
-                echo -e "${RED}   ❌ ERROR: ZIP upload failed after 3 attempts${NC}"
-                rm -f /tmp/zip_upload_response.json
-                exit 1
-            fi
-            sleep 5
-        fi
-    done
+
+    [ -f "$DMG_FILE" ] || { echo -e "${RED}❌ Missing $DMG_FILE${NC}"; exit 1; }
+    [ -f "$ZIP_FILE" ] || { echo -e "${RED}❌ Missing $ZIP_FILE${NC}"; exit 1; }
+
+    upload_asset "$DMG_FILE" "application/x-apple-diskimage"
+    upload_asset "$ZIP_FILE" "application/zip"
 
     echo ""
     echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"

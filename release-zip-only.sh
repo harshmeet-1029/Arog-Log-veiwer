@@ -1,296 +1,109 @@
 #!/bin/bash
+set -e
 
-################################################################################
-# GitHub Release Upload Script - ZIP Only
-# Upload pre-built ZIP binaries to an existing GitHub release
-# No building - just uploading ZIP files!
-################################################################################
-
-set -e  # Exit on error
-
-# Color codes for pretty output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "📦 GitHub Release Upload Script - ZIP Files Only"
+echo "📦 GitHub Release Upload Script (FAST & FIXED)"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
-
-# Check if version is provided
-if [ -z "$1" ]; then
-    echo -e "${RED}❌ ERROR: Version number required!${NC}"
-    echo ""
-    echo "Usage: ./release-zip-only.sh <version> [github-token] [file1] [file2] ..."
-    echo ""
-    echo "Examples:"
-    echo "  # Upload specific ZIP files"
-    echo "  ./release-zip-only.sh 1.0.0 ghp_token file1.zip file2.zip"
-    echo ""
-    echo "  # Auto-detect ZIP files based on version"
-    echo "  ./release-zip-only.sh 1.0.0 ghp_token"
-    echo ""
-    echo "  # Use GITHUB_TOKEN env var"
-    echo "  export GITHUB_TOKEN=ghp_yourtoken"
-    echo "  ./release-zip-only.sh 1.0.0"
-    echo ""
-    exit 1
-fi
 
 VERSION="$1"
 GITHUB_TOKEN="${2:-$GITHUB_TOKEN}"
 
-if [ -z "$GITHUB_TOKEN" ]; then
-    echo -e "${RED}❌ ERROR: GitHub token required!${NC}"
-    echo ""
-    echo "Provide token as argument or set GITHUB_TOKEN environment variable:"
-    echo "  ./release-zip-only.sh $VERSION ghp_yourtoken"
-    echo "OR"
-    echo "  export GITHUB_TOKEN=ghp_yourtoken"
-    echo "  ./release-zip-only.sh $VERSION"
-    echo ""
-    exit 1
+if [[ -z "$VERSION" || -z "$GITHUB_TOKEN" ]]; then
+  echo -e "${RED}❌ Version and GitHub token required${NC}"
+  exit 1
 fi
 
-# Get repository info
 REPO_OWNER=$(git config --get remote.origin.url | sed -n 's/.*github.com[:/]\(.*\)\/\(.*\)\.git/\1/p')
 REPO_NAME=$(git config --get remote.origin.url | sed -n 's/.*github.com[:/]\(.*\)\/\(.*\)\.git/\2/p')
 
-if [ -z "$REPO_OWNER" ] || [ -z "$REPO_NAME" ]; then
-    echo -e "${RED}❌ ERROR: Could not detect GitHub repository!${NC}"
-    echo "   Make sure you're in a git repository with a GitHub remote"
-    exit 1
-fi
-
-echo -e "${BLUE}📋 Configuration:${NC}"
-echo "   Repository: $REPO_OWNER/$REPO_NAME"
-echo "   Version: v$VERSION"
-echo "   GitHub Token: ${GITHUB_TOKEN:0:10}..."
+echo -e "${BLUE}Repo:${NC} $REPO_OWNER/$REPO_NAME"
+echo -e "${BLUE}Version:${NC} v$VERSION"
 echo ""
 
-# Determine files to upload
-shift 2 2>/dev/null || shift 1  # Remove version and token from args
-FILES_TO_UPLOAD=("$@")
+shift 2 || true
+FILES=("$@")
 
-if [ ${#FILES_TO_UPLOAD[@]} -eq 0 ]; then
-    echo -e "${CYAN}🔍 Auto-detecting ZIP files...${NC}"
-    
-    # Look for ZIP patterns only
-    PATTERNS=(
-        "ArgoLogViewer-v${VERSION}-macOS-Intel.zip"
-        "ArgoLogViewer-v${VERSION}-macOS-ARM64.zip"
-        "ArgoLogViewer-macOS-Intel.zip"
-        "ArgoLogViewer-macOS-ARM64.zip"
-        "*.zip"
-    )
-    
-    for pattern in "${PATTERNS[@]}"; do
-        for file in $pattern; do
-            if [ -f "$file" ]; then
-                FILES_TO_UPLOAD+=("$file")
-            fi
-        done
-    done
-    
-    # Also check dist folder for ZIP files only
-    if [ -d "dist" ]; then
-        for file in dist/*.zip; do
-            if [ -f "$file" ]; then
-                FILES_TO_UPLOAD+=("$file")
-            fi
-        done
-    fi
-    
-    # Remove duplicates
-    FILES_TO_UPLOAD=($(echo "${FILES_TO_UPLOAD[@]}" | tr ' ' '\n' | sort -u | tr '\n' ' '))
+if [ ${#FILES[@]} -eq 0 ]; then
+  FILES=( *.zip dist/*.zip )
 fi
 
-if [ ${#FILES_TO_UPLOAD[@]} -eq 0 ]; then
-    echo -e "${RED}❌ ERROR: No ZIP files found to upload!${NC}"
-    echo ""
-    echo "Specify ZIP files manually:"
-    echo "  ./release-zip-only.sh $VERSION $GITHUB_TOKEN file1.zip file2.zip"
-    echo ""
-    echo "Or make sure ZIP files exist in current directory with naming pattern:"
-    echo "  ArgoLogViewer-v${VERSION}-macOS-Intel.zip"
-    echo "  ArgoLogViewer-v${VERSION}-macOS-ARM64.zip"
-    echo ""
-    exit 1
-fi
+FILES=( $(printf "%s\n" "${FILES[@]}" | sort -u) )
 
-echo -e "${GREEN}   ✅ Found ${#FILES_TO_UPLOAD[@]} ZIP file(s) to upload:${NC}"
-
-# Filter to only .zip files
-FILTERED_FILES=()
-for file in "${FILES_TO_UPLOAD[@]}"; do
-    filename=$(basename "$file")
-    extension="${filename##*.}"
-    
-    if [[ "$extension" == "zip" ]]; then
-        FILTERED_FILES+=("$file")
-        if [ -f "$file" ]; then
-            SIZE=$(du -h "$file" | cut -f1)
-            echo "      - $file ($SIZE)"
-        else
-            echo -e "${YELLOW}      ⚠️  $file (not found - will skip)${NC}"
-        fi
-    else
-        echo -e "${YELLOW}      ⚠️  Skipping $file (not a ZIP file)${NC}"
-    fi
+echo -e "${GREEN}Files to upload:${NC}"
+for f in "${FILES[@]}"; do
+  [[ -f "$f" ]] && echo "  - $f"
 done
-
-FILES_TO_UPLOAD=("${FILTERED_FILES[@]}")
 echo ""
 
-# Check if release exists
-echo -e "${CYAN}🔍 Checking release v${VERSION}...${NC}"
-
-# Validate that we have files to upload after filtering
-if [ ${#FILES_TO_UPLOAD[@]} -eq 0 ]; then
-    echo -e "${RED}❌ ERROR: No valid ZIP files to upload after filtering!${NC}"
-    echo ""
-    exit 1
-fi
-
-RELEASE_ID=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
-  "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/tags/v${VERSION}" \
+RELEASE_ID=$(curl -s \
+  -H "Authorization: Bearer $GITHUB_TOKEN" \
+  "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/tags/v$VERSION" \
   | grep '"id":' | head -1 | sed 's/[^0-9]*//g')
 
 if [ -z "$RELEASE_ID" ]; then
-    echo -e "${RED}❌ ERROR: Release v${VERSION} does not exist!${NC}"
-    echo ""
-    echo "Create the release first at:"
-    echo "  https://github.com/$REPO_OWNER/$REPO_NAME/releases/new?tag=v${VERSION}"
-    echo ""
-    echo "Or run GitHub Actions workflow to create it automatically"
-    echo ""
-    exit 1
+  echo -e "${RED}❌ Release v$VERSION not found${NC}"
+  exit 1
 fi
 
-echo -e "${GREEN}   ✅ Release found: ID=$RELEASE_ID${NC}"
+echo -e "${GREEN}Release ID:${NC} $RELEASE_ID"
 echo ""
 
-# Upload function with retry logic
 upload_file() {
-    local file=$1
-    local filename=$(basename "$file")
-    
-    if [ ! -f "$file" ]; then
-        echo -e "${YELLOW}   ⚠️  Skipping $filename (file not found)${NC}"
-        return 0
-    fi
-    
-    echo -e "${CYAN}📤 Uploading: $filename${NC}"
-    
-    # Detect content type
-    case "${filename##*.}" in
-        dmg)  CONTENT_TYPE="application/x-apple-diskimage" ;;
-        zip)  CONTENT_TYPE="application/zip" ;;
-        exe)  CONTENT_TYPE="application/x-msdownload" ;;
-        gz)   CONTENT_TYPE="application/gzip" ;;
-        tar)  CONTENT_TYPE="application/x-tar" ;;
-        txt)  CONTENT_TYPE="text/plain" ;;
-        *)    CONTENT_TYPE="application/octet-stream" ;;
-    esac
-    
-    # Get file size
-    FILE_SIZE=$(du -h "$file" | cut -f1)
-    echo "   Size: $FILE_SIZE"
-    echo "   Type: $CONTENT_TYPE"
-    
-    # Check if asset already exists and delete it
-    echo "   Checking for existing asset..."
-    EXISTING_ASSET_ID=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
-      "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/$RELEASE_ID/assets" \
-      | grep -A 3 "\"name\": \"$filename\"" | grep '"id":' | head -1 | sed 's/[^0-9]*//g')
-    
-    if [ -n "$EXISTING_ASSET_ID" ]; then
-        echo "   Deleting existing asset (ID: $EXISTING_ASSET_ID)..."
-        curl -s -X DELETE \
-          -H "Authorization: token $GITHUB_TOKEN" \
-          "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/assets/$EXISTING_ASSET_ID" \
-          > /dev/null
-        echo "   ✓ Existing asset deleted"
-    fi
-    
-    # Upload with retry logic (3 attempts)
-    for attempt in 1 2 3; do
-        if [ $attempt -gt 1 ]; then
-            echo "   Retry attempt $attempt of 3..."
-        fi
-        
-        HTTP_CODE=$(curl --max-time 0 --connect-timeout 60 \
-          --write-out "%{http_code}" \
-          --progress-bar \
-          -o /tmp/upload_response.json \
-          -X POST \
-          -H "Authorization: token $GITHUB_TOKEN" \
-          -H "Content-Type: $CONTENT_TYPE" \
-          --data-binary @"$file" \
-          "https://uploads.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/$RELEASE_ID/assets?name=$filename")
-        
-        if [ "$HTTP_CODE" -eq 201 ]; then
-            echo -e "${GREEN}   ✅ $filename uploaded successfully${NC}"
-            rm -f /tmp/upload_response.json
-            return 0
-        else
-            echo -e "${YELLOW}   ⚠️  Upload failed with HTTP code: $HTTP_CODE${NC}"
-            if [ -f /tmp/upload_response.json ]; then
-                echo "   Response:"
-                cat /tmp/upload_response.json | head -5
-            fi
-            if [ $attempt -eq 3 ]; then
-                echo -e "${RED}   ❌ ERROR: Upload failed after 3 attempts${NC}"
-                rm -f /tmp/upload_response.json
-                return 1
-            fi
-            sleep 5
-        fi
-    done
+  local file="$1"
+  local name=$(basename "$file")
+
+  FILE_BYTES=$(stat -f%z "$file")
+  CONTENT_TYPE="application/zip"
+
+  echo -e "${CYAN}📤 Uploading $name ($(numfmt --to=iec $FILE_BYTES))${NC}"
+
+  EXISTING_ID=$(curl -s \
+    -H "Authorization: Bearer $GITHUB_TOKEN" \
+    "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/$RELEASE_ID/assets" \
+    | grep -A3 "\"name\": \"$name\"" | grep '"id":' | sed 's/[^0-9]*//g')
+
+  if [ -n "$EXISTING_ID" ]; then
+    echo "   Deleting existing asset..."
+    curl -s -X DELETE \
+      -H "Authorization: Bearer $GITHUB_TOKEN" \
+      "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/assets/$EXISTING_ID" \
+      >/dev/null
+  fi
+
+  HTTP_CODE=$(curl -L --http1.1 \
+    --connect-timeout 60 \
+    --max-time 0 \
+    --progress-bar \
+    --write-out "%{http_code}" \
+    -o /tmp/upload.json \
+    -X POST \
+    -H "Authorization: Bearer $GITHUB_TOKEN" \
+    -H "Content-Type: $CONTENT_TYPE" \
+    -H "Content-Length: $FILE_BYTES" \
+    --data-binary @"$file" \
+    "https://uploads.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/$RELEASE_ID/assets?name=$name")
+
+  if [ "$HTTP_CODE" -ne 201 ]; then
+    echo -e "${RED}❌ Upload failed (HTTP $HTTP_CODE)${NC}"
+    cat /tmp/upload.json
+    exit 1
+  fi
+
+  echo -e "${GREEN}✅ Uploaded $name${NC}"
 }
 
-# Upload all files
-echo -e "${CYAN}🚀 Starting ZIP uploads...${NC}"
-echo ""
-
-UPLOAD_COUNT=0
-FAILED_COUNT=0
-
-for file in "${FILES_TO_UPLOAD[@]}"; do
-    if upload_file "$file"; then
-        ((UPLOAD_COUNT++))
-    else
-        ((FAILED_COUNT++))
-    fi
-    echo ""
+for f in "${FILES[@]}"; do
+  [[ -f "$f" ]] && upload_file "$f"
 done
 
-# Final summary
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-if [ $FAILED_COUNT -eq 0 ]; then
-    echo -e "${GREEN}✅ SUCCESS! All ZIP files uploaded${NC}"
-    echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    echo -e "${BLUE}📊 Summary:${NC}"
-    echo "   Uploaded: $UPLOAD_COUNT file(s)"
-    echo "   Failed: $FAILED_COUNT"
-else
-    echo -e "${YELLOW}⚠️  Upload completed with errors${NC}"
-    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    echo -e "${BLUE}📊 Summary:${NC}"
-    echo "   Uploaded: $UPLOAD_COUNT file(s)"
-    echo -e "   ${RED}Failed: $FAILED_COUNT${NC}"
-fi
 echo ""
-echo -e "${BLUE}🌐 View release at:${NC}"
-echo "   https://github.com/$REPO_OWNER/$REPO_NAME/releases/tag/v${VERSION}"
-echo ""
-
-if [ $FAILED_COUNT -gt 0 ]; then
-    exit 1
-fi
+echo -e "${GREEN}🎉 All uploads completed successfully${NC}"
+echo "https://github.com/$REPO_OWNER/$REPO_NAME/releases/tag/v$VERSION"
