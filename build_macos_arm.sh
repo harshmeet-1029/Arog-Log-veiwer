@@ -110,6 +110,16 @@ echo ""
 pyinstaller ArgoLogViewer.spec --clean --target-arch arm64
 
 echo ""
+echo "[6.5/8] Fixing code signatures..."
+
+# Remove all code signatures to prevent Team ID mismatches
+sudo codesign --remove-signature dist/ArgoLogViewer.app/Contents/MacOS/ArgoLogViewer 2>/dev/null || true
+
+# Re-sign with consistent ad-hoc signature (deep sign everything)
+sudo codesign -s - --deep --force dist/ArgoLogViewer.app
+
+echo "✓ Code signatures fixed"
+echo ""
 echo "⚠️  NOTE: This build is NOT code-signed or notarized"
 echo "   Users will need to bypass macOS Gatekeeper"
 echo "   See: MACOS_INSTALLATION.md for instructions"

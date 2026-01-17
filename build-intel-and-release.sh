@@ -144,6 +144,17 @@ python3 -m PyInstaller --name="ArgoLogViewer" \
   app/main.py
 
 echo ""
+echo -e "${BLUE}🔧 Fixing code signatures for distribution...${NC}"
+
+# Remove all code signatures to prevent Team ID mismatches
+sudo codesign --remove-signature dist/ArgoLogViewer.app/Contents/MacOS/ArgoLogViewer 2>/dev/null || true
+
+# Re-sign with consistent ad-hoc signature (deep sign everything)
+sudo codesign -s - --deep --force dist/ArgoLogViewer.app
+
+echo -e "${GREEN}   ✅ Code signatures fixed${NC}"
+
+echo ""
 echo -e "${YELLOW}⚠️  IMPORTANT SECURITY NOTICE:${NC}"
 echo -e "${YELLOW}   This build is NOT code-signed or notarized by Apple${NC}"
 echo -e "${YELLOW}   Users will see a Gatekeeper warning on first launch${NC}"

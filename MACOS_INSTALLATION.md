@@ -57,7 +57,7 @@ Choose **ONE** of these methods:
 
 ---
 
-### Method 2: Terminal Command (Advanced) 🖥️
+### Method 2: Terminal Command (Alternative) 🖥️
 
 **Step 1:** Install the DMG or ZIP
 - **DMG:** Open it, drag to Applications, eject
@@ -70,8 +70,9 @@ Open **Terminal** and run:
 xattr -cr /Applications/ArgoLogViewer.app
 ```
 
-**Step 3:** Open the app
+**Step 3:** Open the app normally
 - Double-click **ArgoLogViewer** in Applications
+- You may still need to right-click → "Open" on first launch
 - ✅ It should open without errors
 
 **Why this works:** This removes the "quarantine" flag macOS adds to downloaded files.
@@ -158,27 +159,21 @@ shasum -a 256 ~/Downloads/ArgoLogViewer-vX.X.X-macOS-*.zip
 xattr -cr /Applications/ArgoLogViewer.app
 ```
 
-Then try opening again.
+Then right-click → Open.
 
 ---
 
-### Problem: "No application is set to open the file"
+### Problem: App opens briefly then closes immediately
 
-**Solution:** The file wasn't installed correctly. Make sure:
-1. You dragged the app to **Applications**
-2. You're opening the **.app** file (not the DMG or ZIP)
+This was an issue with older builds. **Download the latest version** - it's been fixed in the build process.
 
----
+If you still have issues:
+```bash
+# Check if the app is properly signed
+codesign -dvvv /Applications/ArgoLogViewer.app 2>&1 | grep "Signature"
+```
 
-### Problem: Still can't open after trying all methods
-
-**Solution:**
-1. Delete the app completely:
-   ```bash
-   rm -rf /Applications/ArgoLogViewer.app
-   ```
-2. Re-download from GitHub releases
-3. Try **Method 2** (Terminal command) above
+Should show `Signature=adhoc`. If not, re-download the latest release.
 
 ---
 

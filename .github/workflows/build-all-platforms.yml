@@ -119,6 +119,17 @@ jobs:
           --target-arch arm64 \
           --codesign-identity - \
           app/main.py
+        
+        echo ""
+        echo "🔧 Fixing code signatures..."
+        
+        # Remove all code signatures to prevent Team ID mismatches
+        sudo codesign --remove-signature dist/ArgoLogViewer.app/Contents/MacOS/ArgoLogViewer 2>/dev/null || true
+        
+        # Re-sign with consistent ad-hoc signature
+        sudo codesign -s - --deep --force dist/ArgoLogViewer.app
+        
+        echo "✅ Code signatures fixed"
     
     - name: Verify Apple Silicon binary
       run: |
