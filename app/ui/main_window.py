@@ -380,6 +380,9 @@ class MainWindow(QWidget):
         menu_bar = self._create_menu_bar()
         main_layout.setMenuBar(menu_bar)
         
+        # Add spacing between menu bar and connection controls
+        main_layout.addSpacing(5)
+        
         # Connection controls at top
         connection_group = self._create_connection_controls()
         main_layout.addWidget(connection_group)
