@@ -5,6 +5,24 @@ import os
 
 block_cipher = None
 
+# Read version from pyproject.toml
+def read_version():
+    """Read version from pyproject.toml"""
+    try:
+        with open('pyproject.toml', 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith('version') and '=' in line:
+                    parts = line.split('=', 1)
+                    if len(parts) == 2:
+                        return parts[1].strip().strip('"').strip("'")
+    except Exception as e:
+        print(f"Warning: Could not read version from pyproject.toml: {e}")
+    return "1.0.0"  # Fallback
+
+APP_VERSION = read_version()
+print(f"Building ArgoLogViewer version {APP_VERSION}")
+
 # Platform-specific settings
 if sys.platform == 'darwin':  # macOS
     icon_file = 'app/icon.icns'
@@ -76,7 +94,7 @@ if sys.platform == 'darwin':
         info_plist={
             'NSPrincipalClass': 'NSApplication',
             'NSHighResolutionCapable': 'True',
-            'CFBundleShortVersionString': '1.0.0',
-            'CFBundleVersion': '1.0.0',
+            'CFBundleShortVersionString': APP_VERSION,
+            'CFBundleVersion': APP_VERSION,
         },
     )

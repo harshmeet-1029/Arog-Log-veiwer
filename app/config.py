@@ -297,9 +297,6 @@ class AppConfig:
 class UpdateConfig:
     """OTA Update configuration."""
     
-    # Current application version
-    CURRENT_VERSION = "1.0.0"
-    
     # Update server URL (GitHub Releases - public repo, no token needed!)
     UPDATE_SERVER_URL = os.getenv(
         "ARGO_UPDATE_SERVER_URL",
@@ -313,9 +310,63 @@ class UpdateConfig:
     UPDATE_CHECK_INTERVAL = int(os.getenv("ARGO_UPDATE_CHECK_INTERVAL", str(24 * 60 * 60)))
     
     @staticmethod
+    def _read_version_from_pyproject() -> Optional[str]:
+        """
+        Read version from pyproject.toml file.
+        
+        Returns:
+            Version string if found, None otherwise
+        """
+        try:
+            # Get the project root directory (where pyproject.toml should be)
+            current_file = Path(__file__)
+            project_root = current_file.parent.parent  # Go up from app/ to project root
+            pyproject_path = project_root / "pyproject.toml"
+            
+            if not pyproject_path.exists():
+                logger.debug(f"pyproject.toml not found at {pyproject_path}")
+                return None
+            
+            with open(pyproject_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    # Look for version = "x.y.z" in pyproject.toml
+                    if line.startswith('version') and '=' in line:
+                        # Extract version string between quotes
+                        parts = line.split('=', 1)
+                        if len(parts) == 2:
+                            version_str = parts[1].strip().strip('"').strip("'")
+                            logger.info(f"Read version from pyproject.toml: {version_str}")
+                            return version_str
+            
+            logger.warning("Version not found in pyproject.toml")
+            return None
+            
+        except Exception as e:
+            logger.warning(f"Error reading version from pyproject.toml: {e}")
+            return None
+    
+    @staticmethod
     def get_current_version() -> str:
-        """Get current application version."""
-        return UpdateConfig.CURRENT_VERSION
+        """
+        Get current application version.
+        
+        Reads from pyproject.toml if available (during development),
+        falls back to default version for frozen/bundled builds.
+        
+        Returns:
+            Version string (e.g., "1.0.0")
+        """
+        # Try to read from pyproject.toml first
+        version = UpdateConfig._read_version_from_pyproject()
+        
+        # Fall back to default version if pyproject.toml not available
+        # This happens when the app is frozen (PyInstaller) or installed
+        if version is None:
+            version = "1.0.0"  # Fallback version
+            logger.debug(f"Using fallback version: {version}")
+        
+        return version
     
     @staticmethod
     def get_update_server_url() -> str:

@@ -22,6 +22,14 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
+    - name: Update version in pyproject.toml
+      shell: bash
+      run: |
+        echo "📝 Updating version to ${{ github.event.inputs.version }}"
+        sed -i 's/^version = ".*"/version = "${{ github.event.inputs.version }}"/' pyproject.toml
+        echo "✅ Version updated in pyproject.toml"
+        grep "^version" pyproject.toml
+    
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
@@ -68,6 +76,13 @@ jobs:
     runs-on: macos-latest  # Apple Silicon runner
     steps:
     - uses: actions/checkout@v4
+    
+    - name: Update version in pyproject.toml
+      run: |
+        echo "📝 Updating version to ${{ github.event.inputs.version }}"
+        sed -i '' 's/^version = ".*"/version = "${{ github.event.inputs.version }}"/' pyproject.toml
+        echo "✅ Version updated in pyproject.toml"
+        grep "^version" pyproject.toml
     
     - name: Set up Python
       uses: actions/setup-python@v5
@@ -188,6 +203,13 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
+    - name: Update version in pyproject.toml
+      run: |
+        echo "📝 Updating version to ${{ github.event.inputs.version }}"
+        sed -i 's/^version = ".*"/version = "${{ github.event.inputs.version }}"/' pyproject.toml
+        echo "✅ Version updated in pyproject.toml"
+        grep "^version" pyproject.toml
+    
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
@@ -233,6 +255,23 @@ jobs:
     if: github.event.inputs.create_release == 'true'
     
     steps:
+    - uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        fetch-depth: 0
+    
+    - name: Update and commit version
+      run: |
+        echo "📝 Updating version to ${{ github.event.inputs.version }}"
+        sed -i 's/^version = ".*"/version = "${{ github.event.inputs.version }}"/' pyproject.toml
+        
+        git config user.name "GitHub Actions Bot"
+        git config user.email "actions@github.com"
+        git add pyproject.toml
+        git commit -m "Bump version to ${{ github.event.inputs.version }}" || echo "No changes to commit"
+        git push origin main || echo "Nothing to push"
+        echo "✅ Version committed and pushed"
+    
     - name: Download all artifacts
       uses: actions/download-artifact@v4
     

@@ -271,6 +271,10 @@ ssh-add ~/.ssh/your-key  # Add key if needed
 
 ## Development
 
+### Creating a Release
+
+See [RELEASE.md](RELEASE.md) - Just enter version in GitHub UI!
+
 ### Running with Debug Logging
 
 Edit `app/main.py` and ensure:
