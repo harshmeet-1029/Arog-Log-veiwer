@@ -62,8 +62,19 @@ upload_file() {
 
   FILE_BYTES=$(stat -f%z "$file")
   CONTENT_TYPE="application/zip"
+  
+  # Convert bytes to human-readable format (macOS compatible)
+  if [ $FILE_BYTES -ge 1073741824 ]; then
+      FILE_SIZE=$(echo "scale=1; $FILE_BYTES/1073741824" | bc)"G"
+  elif [ $FILE_BYTES -ge 1048576 ]; then
+      FILE_SIZE=$(echo "scale=1; $FILE_BYTES/1048576" | bc)"M"
+  elif [ $FILE_BYTES -ge 1024 ]; then
+      FILE_SIZE=$(echo "scale=1; $FILE_BYTES/1024" | bc)"K"
+  else
+      FILE_SIZE="${FILE_BYTES}B"
+  fi
 
-  echo -e "${CYAN}📤 Uploading $name ($(numfmt --to=iec $FILE_BYTES))${NC}"
+  echo -e "${CYAN}📤 Uploading $name ($FILE_SIZE)${NC}"
 
   EXISTING_ID=$(curl -s \
     -H "Authorization: Bearer $GITHUB_TOKEN" \

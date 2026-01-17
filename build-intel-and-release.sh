@@ -223,8 +223,19 @@ upload_asset() {
     filename=$(basename "$file")
 
     FILE_BYTES=$(stat -f%z "$file")
+    
+    # Convert bytes to human-readable format (macOS compatible)
+    if [ $FILE_BYTES -ge 1073741824 ]; then
+        FILE_SIZE=$(echo "scale=1; $FILE_BYTES/1073741824" | bc)"G"
+    elif [ $FILE_BYTES -ge 1048576 ]; then
+        FILE_SIZE=$(echo "scale=1; $FILE_BYTES/1048576" | bc)"M"
+    elif [ $FILE_BYTES -ge 1024 ]; then
+        FILE_SIZE=$(echo "scale=1; $FILE_BYTES/1024" | bc)"K"
+    else
+        FILE_SIZE="${FILE_BYTES}B"
+    fi
 
-    echo -e "${CYAN}📤 Uploading: $filename ($(numfmt --to=iec $FILE_BYTES))${NC}"
+    echo -e "${CYAN}📤 Uploading: $filename ($FILE_SIZE)${NC}"
 
     HTTP_CODE=$(curl -L --http1.1 \
       --connect-timeout 60 \
