@@ -109,6 +109,11 @@ echo ""
 # Build specifically for ARM64
 pyinstaller ArgoLogViewer.spec --clean --target-arch arm64
 
+echo ""
+echo "⚠️  NOTE: This build is NOT code-signed or notarized"
+echo "   Users will need to bypass macOS Gatekeeper"
+echo "   See: MACOS_INSTALLATION.md for instructions"
+
 # Verify build
 echo ""
 echo "[7/8] Verifying build..."
@@ -162,6 +167,10 @@ if [ -f "ArgoLogViewer-macOS-ARM64.dmg" ]; then
     echo "  2. ArgoLogViewer-macOS-ARM64.dmg (Installer)"
     echo "     Size: $DMG_SIZE"
     echo "     For distribution to Apple Silicon Mac users"
+    echo ""
+    echo "⚠️  IMPORTANT: This DMG is NOT code-signed"
+    echo "   Users must bypass Gatekeeper to open"
+    echo "   Include MACOS_INSTALLATION.md with distribution"
 fi
 echo ""
 echo "Architecture: ARM64 (Apple Silicon)"

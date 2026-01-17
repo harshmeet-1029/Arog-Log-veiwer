@@ -243,6 +243,18 @@ jobs:
           
           Professional desktop application for viewing Argo Workflow logs via SSH.
           
+          ---
+          
+          ### ⚠️ macOS Users: Security Notice
+          
+          **macOS will block this app on first launch** because it's not code-signed by Apple. This is normal and expected.
+          
+          **Quick Fix:** Right-click the app → "Open" → "Open" again
+          
+          **For detailed instructions, see:** [macOS Installation Guide](../../blob/main/MACOS_INSTALLATION.md)
+          
+          ---
+          
           ### 📥 Downloads
           
           Choose the version for your operating system:
@@ -272,6 +284,8 @@ jobs:
           |----------|------|
           | [ArgoLogViewer-v${{ github.event.inputs.version }}-Linux](../../releases/download/v${{ github.event.inputs.version }}/ArgoLogViewer-v${{ github.event.inputs.version }}-Linux) | ~70 MB |
           
+          ---
+          
           ### 📋 Installation Instructions
           
           #### Windows
@@ -283,19 +297,23 @@ jobs:
           1. Download the correct DMG file for your Mac type
           2. Open the DMG file
           3. Drag "ArgoLogViewer" to Applications folder
-          4. Right-click app → "Open" (first time only, to bypass Gatekeeper)
+          4. **Right-click the app → "Open"** (first time only, to bypass Gatekeeper)
+          5. Click "Open" again in the confirmation dialog
           
           #### macOS (ZIP)
           1. Download and unzip the correct ZIP file
           2. Move to Applications folder
-          3. Run: `xattr -cr /Applications/ArgoLogViewer.app`
-          4. Double-click to open
+          3. Run in Terminal: `xattr -cr /Applications/ArgoLogViewer.app`
+          4. Open the app normally
+          
+          **📖 macOS users: See detailed guide:** [MACOS_INSTALLATION.md](../../blob/main/MACOS_INSTALLATION.md)
           
           #### Linux
           1. Download `ArgoLogViewer-v${{ github.event.inputs.version }}-Linux`
           2. Make executable: `chmod +x ArgoLogViewer-v${{ github.event.inputs.version }}-Linux`
           3. Run: `./ArgoLogViewer-v${{ github.event.inputs.version }}-Linux`
           
+          ---
           ### ✅ Compatibility
           
           **macOS:**

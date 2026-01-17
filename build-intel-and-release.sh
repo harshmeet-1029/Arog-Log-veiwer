@@ -144,6 +144,12 @@ python3 -m PyInstaller --name="ArgoLogViewer" \
   app/main.py
 
 echo ""
+echo -e "${YELLOW}⚠️  IMPORTANT SECURITY NOTICE:${NC}"
+echo -e "${YELLOW}   This build is NOT code-signed or notarized by Apple${NC}"
+echo -e "${YELLOW}   Users will see a Gatekeeper warning on first launch${NC}"
+echo -e "${YELLOW}   See MACOS_INSTALLATION.md for user instructions${NC}"
+
+echo ""
 echo -e "${GREEN}   ✅ Build complete!${NC}"
 echo ""
 
@@ -275,6 +281,9 @@ if [ "$AUTO_UPLOAD" = true ]; then
     echo "   - ArgoLogViewer-v${VERSION}-macOS-Intel.dmg"
     echo "   - ArgoLogViewer-v${VERSION}-macOS-Intel.zip"
     echo ""
+    echo -e "${YELLOW}⚠️  REMINDER: Add macOS installation instructions to release notes${NC}"
+    echo -e "${YELLOW}   Copy from: MACOS_INSTALLATION.md${NC}"
+    echo ""
     echo -e "${BLUE}🌐 View release at:${NC}"
     echo "   https://github.com/$REPO_OWNER/$REPO_NAME/releases/tag/v${VERSION}"
 else
@@ -296,7 +305,10 @@ else
     echo "   1. Click the link above"
     echo "   2. Scroll to 'Attach binaries' section"
     echo "   3. Drag and drop the DMG and ZIP files"
-    echo "   4. Click 'Update release'"
+    echo "   4. Add macOS installation instructions (see MACOS_INSTALLATION.md)"
+    echo "   5. Click 'Update release'"
+    echo ""
+    echo -e "${YELLOW}⚠️  IMPORTANT: Include Gatekeeper bypass instructions in release notes${NC}"
 fi
 
 echo ""

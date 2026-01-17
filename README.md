@@ -69,6 +69,14 @@ argo-log-viewer/
 
 ## Installation
 
+### Pre-built Binaries (Recommended)
+
+Download the latest release from [GitHub Releases](../../releases).
+
+**macOS Users:** See [macOS Installation Guide](MACOS_INSTALLATION.md) for important security information.
+
+---
+
 ### 1. Clone or extract the project
 
 ```bash
@@ -133,6 +141,9 @@ Automatic update checking:
 **For complete guide on all features, see: [FEATURES_GUIDE.md](FEATURES_GUIDE.md)**
 
 ### Using the Application
+
+**macOS First-Time Setup:**
+If you're on macOS, you'll need to bypass Gatekeeper security. See [macOS Installation Guide](MACOS_INSTALLATION.md) for detailed instructions.
 
 1. **Connect**: Click "Connect" button to establish SSH connection chain
    - Watch console output to see connection progress
@@ -216,6 +227,18 @@ All user inputs are sanitized:
 - Proper signal handling for Ctrl+C
 
 ## Troubleshooting
+
+### macOS: "App can't be opened because Apple cannot check it"
+
+**Solution:** This is normal for unsigned apps. See [macOS Installation Guide](MACOS_INSTALLATION.md) for bypass instructions.
+
+Quick fix:
+```bash
+xattr -cr /Applications/ArgoLogViewer.app
+```
+Or right-click the app → "Open" → "Open"
+
+---
 
 ### "Connection failed: Authentication failed"
 

@@ -108,6 +108,11 @@ echo ""
 
 pyinstaller ArgoLogViewer.spec --clean
 
+echo ""
+echo "⚠️  NOTE: This build is NOT code-signed or notarized"
+echo "   Users will need to bypass macOS Gatekeeper"
+echo "   See: MACOS_INSTALLATION.md for instructions"
+
 # Verify build
 echo ""
 echo "[7/8] Verifying build..."
@@ -161,6 +166,10 @@ if [ -f "ArgoLogViewer-macOS-Intel.dmg" ]; then
     echo "  2. ArgoLogViewer-macOS-Intel.dmg (Installer)"
     echo "     Size: $DMG_SIZE"
     echo "     For distribution to Intel Mac users"
+    echo ""
+    echo "⚠️  IMPORTANT: This DMG is NOT code-signed"
+    echo "   Users must bypass Gatekeeper to open"
+    echo "   Include MACOS_INSTALLATION.md with distribution"
 fi
 echo ""
 echo "Architecture: Intel (x86_64)"
