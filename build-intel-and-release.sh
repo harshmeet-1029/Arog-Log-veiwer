@@ -131,7 +131,7 @@ echo ""
 
 python3 -m PyInstaller --name="ArgoLogViewer" \
   --windowed \
-  --onefile \
+  --onedir \
   --icon="app/icon.icns" \
   --add-data="app:app" \
   --hidden-import=PySide6 \

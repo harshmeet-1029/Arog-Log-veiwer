@@ -39,16 +39,13 @@ icon_path = icon_file if os.path.exists(icon_file) else None
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,  # Changed for --onedir mode
     name='ArgoLogViewer',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    upx_exclude=[],
-    runtime_tmpdir=None,
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -58,10 +55,21 @@ exe = EXE(
     icon=icon_path,
 )
 
+# Collect all files for --onedir mode
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name='ArgoLogViewer',
+)
+
 # macOS app bundle
 if sys.platform == 'darwin':
     app = BUNDLE(
-        exe,
+        coll,  # Changed from 'exe' to 'coll' for --onedir
         name='ArgoLogViewer.app',
         icon=icon_path,
         bundle_identifier='com.harshmeet.argologviewer',
