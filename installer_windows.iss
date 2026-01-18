@@ -5,7 +5,7 @@
 #define MyAppName "Argo Log Viewer"
 #define MyAppVersion "1.0.0"
 #define MyAppPublisher "Harshmeet Singh"
-#define MyAppURL "https://github.com/harshmeetsingh/argo-log-viewer"
+#define MyAppURL "https://github.com/harshmeet-1029/Arog-Log-veiwer"
 #define MyAppExeName "ArgoLogViewer.exe"
 
 [Setup]
