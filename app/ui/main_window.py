@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
     QListWidget, QTextEdit, QLineEdit, QLabel, 
     QMessageBox, QSplitter, QGroupBox, QComboBox,
-    QMenuBar, QDialog, QDialogButtonBox, QFileDialog
+    QMenuBar, QDialog, QDialogButtonBox, QFileDialog, QSizePolicy
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import (
@@ -374,14 +374,21 @@ class MainWindow(QWidget):
         logger.debug("Creating main layout")
         main_layout = QVBoxLayout(self)
         main_layout.setSpacing(10)
-        main_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Platform-specific margins - macOS needs more spacing
+        is_macos = sys.platform == 'darwin'
+        if is_macos:
+            main_layout.setContentsMargins(10, 5, 10, 10)  # macOS: extra margins
+        else:
+            main_layout.setContentsMargins(0, 0, 0, 0)  # Windows/Linux: no margins
         
         # Menu bar at the very top
         menu_bar = self._create_menu_bar()
         main_layout.setMenuBar(menu_bar)
         
         # Add spacing between menu bar and connection controls
-        main_layout.addSpacing(5)
+        # macOS needs more spacing due to native menu bar rendering
+        main_layout.addSpacing(15 if is_macos else 5)
         
         # Connection controls at top
         connection_group = self._create_connection_controls()
@@ -604,12 +611,20 @@ class MainWindow(QWidget):
         
         group = QGroupBox("Connection")
         layout = QHBoxLayout()
-        layout.setContentsMargins(5, 5, 5, 5)  # Smaller margins
+        
+        # Platform-specific margins - macOS needs more internal spacing
+        is_macos = sys.platform == 'darwin'
+        if is_macos:
+            layout.setContentsMargins(10, 8, 10, 8)  # macOS: extra padding
+        else:
+            layout.setContentsMargins(5, 5, 5, 5)  # Windows/Linux: compact
+        
         layout.setSpacing(10)  # Tighter spacing
         
         # Connection status label (compact)
         self.status_label = QLabel("● Disconnected")
         self.status_label.setStyleSheet("color: red; font-weight: bold; font-size: 11pt;")
+        self.status_label.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         layout.addWidget(self.status_label)
         
         layout.addStretch()
@@ -620,21 +635,26 @@ class MainWindow(QWidget):
         layout.addWidget(theme_label)
         self.theme_combo = QComboBox()
         self.theme_combo.addItems(["Dark", "Light"])
-        self.theme_combo.setMaximumWidth(80)
+        self.theme_combo.setMinimumWidth(80)
         self.theme_combo.setMinimumHeight(25)
+        self.theme_combo.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         self.theme_combo.currentTextChanged.connect(self._on_theme_changed)
         layout.addWidget(self.theme_combo)
         
         # Connect button (compact)
         self.connect_btn = QPushButton("Connect")
         self.connect_btn.clicked.connect(self.handle_connect)
-        self.connect_btn.setFixedSize(80, 28)
+        self.connect_btn.setMinimumWidth(80)
+        self.connect_btn.setMinimumHeight(28)
+        self.connect_btn.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         layout.addWidget(self.connect_btn)
         
         # Disconnect button (compact)
         self.disconnect_btn = QPushButton("Disconnect")
         self.disconnect_btn.clicked.connect(self.handle_disconnect)
-        self.disconnect_btn.setFixedSize(90, 28)
+        self.disconnect_btn.setMinimumWidth(90)
+        self.disconnect_btn.setMinimumHeight(28)
+        self.disconnect_btn.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         layout.addWidget(self.disconnect_btn)
         
         group.setLayout(layout)
@@ -728,7 +748,9 @@ class MainWindow(QWidget):
         self.fullscreen_btn = QPushButton("⛶ Fullscreen")
         self.fullscreen_btn.setToolTip("Enter fullscreen mode (Logs only)")
         self.fullscreen_btn.clicked.connect(self.toggle_fullscreen)
-        self.fullscreen_btn.setFixedSize(120, 28)
+        self.fullscreen_btn.setMinimumWidth(120)
+        self.fullscreen_btn.setMinimumHeight(28)
+        self.fullscreen_btn.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         self.fullscreen_btn.setVisible(False)  # Hidden by default
         header_layout.addWidget(self.fullscreen_btn)
         
@@ -1209,7 +1231,9 @@ class MainWindow(QWidget):
             exit_fullscreen_btn = QPushButton("✕ Exit Fullscreen")
             exit_fullscreen_btn.clicked.connect(self.toggle_fullscreen)
             exit_fullscreen_btn.setToolTip("Exit fullscreen (Esc or F11)")
-            exit_fullscreen_btn.setFixedSize(140, 30)
+            exit_fullscreen_btn.setMinimumWidth(140)
+            exit_fullscreen_btn.setMinimumHeight(30)
+            exit_fullscreen_btn.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
             header_layout.addWidget(exit_fullscreen_btn)
             
             fullscreen_layout.addLayout(header_layout)
@@ -1963,7 +1987,8 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
         folder_layout.addWidget(folder_path_input)
         
         browse_btn = QPushButton("Browse...")
-        browse_btn.setFixedWidth(100)
+        browse_btn.setMinimumWidth(100)
+        browse_btn.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         browse_btn.clicked.connect(
             lambda: self._browse_for_ssh_folder(folder_path_input)
         )
