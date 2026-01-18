@@ -22,13 +22,15 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - name: Update version in pyproject.toml
+    - name: Update version in pyproject.toml and installer script
       shell: bash
       run: |
         echo "📝 Updating version to ${{ github.event.inputs.version }}"
         sed -i 's/^version = ".*"/version = "${{ github.event.inputs.version }}"/' pyproject.toml
-        echo "✅ Version updated in pyproject.toml"
+        sed -i 's/#define MyAppVersion ".*"/#define MyAppVersion "${{ github.event.inputs.version }}"/' installer_windows.iss
+        echo "✅ Version updated in pyproject.toml and installer_windows.iss"
         grep "^version" pyproject.toml
+        grep "MyAppVersion" installer_windows.iss
     
     - name: Set up Python
       uses: actions/setup-python@v5
@@ -54,21 +56,44 @@ jobs:
           --clean `
           app/main.py
     
-    - name: Rename with version
+    - name: Create portable version
       run: |
-        Copy-Item "dist\ArgoLogViewer.exe" "ArgoLogViewer-v${{ github.event.inputs.version }}-Windows.exe"
+        Copy-Item "dist\ArgoLogViewer.exe" "ArgoLogViewer-v${{ github.event.inputs.version }}-Windows-Portable.exe"
+        echo "✅ Portable version created"
     
-    - name: Generate checksum
+    - name: Install Inno Setup
       run: |
-        $hash = Get-FileHash -Algorithm SHA256 "ArgoLogViewer-v${{ github.event.inputs.version }}-Windows.exe"
-        "$($hash.Hash)  ArgoLogViewer-v${{ github.event.inputs.version }}-Windows.exe" | Out-File -Encoding ASCII checksums-windows.txt
+        choco install innosetup -y
+        echo "✅ Inno Setup installed"
     
-    - name: Upload Windows artifact
+    - name: Build Windows Installer
+      run: |
+        & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer_windows.iss
+        echo "✅ Windows installer created"
+    
+    - name: Rename installer with version
+      run: |
+        $installerPath = Get-ChildItem -Path "installers\windows\ArgoLogViewer-*-Windows-Setup.exe" | Select-Object -First 1
+        if ($installerPath) {
+          Copy-Item $installerPath.FullName "ArgoLogViewer-v${{ github.event.inputs.version }}-Windows-Installer.exe"
+          echo "✅ Installer renamed"
+        }
+    
+    - name: Generate checksums
+      run: |
+        $portable = Get-FileHash -Algorithm SHA256 "ArgoLogViewer-v${{ github.event.inputs.version }}-Windows-Portable.exe"
+        $installer = Get-FileHash -Algorithm SHA256 "ArgoLogViewer-v${{ github.event.inputs.version }}-Windows-Installer.exe"
+        "$($portable.Hash)  ArgoLogViewer-v${{ github.event.inputs.version }}-Windows-Portable.exe" | Out-File -Encoding ASCII checksums-windows.txt
+        "$($installer.Hash)  ArgoLogViewer-v${{ github.event.inputs.version }}-Windows-Installer.exe" | Add-Content -Encoding ASCII checksums-windows.txt
+        echo "✅ Checksums generated"
+    
+    - name: Upload Windows artifacts
       uses: actions/upload-artifact@v4
       with:
         name: ArgoLogViewer-Windows
         path: |
-          ArgoLogViewer-v${{ github.event.inputs.version }}-Windows.exe
+          ArgoLogViewer-v${{ github.event.inputs.version }}-Windows-Portable.exe
+          ArgoLogViewer-v${{ github.event.inputs.version }}-Windows-Installer.exe
           checksums-windows.txt
 
   build-macos-arm:
@@ -232,21 +257,149 @@ jobs:
           --clean \
           app/main.py
     
-    - name: Rename and make executable
+    - name: Create portable version
       run: |
-        mv dist/ArgoLogViewer ArgoLogViewer-v${{ github.event.inputs.version }}-Linux
-        chmod +x ArgoLogViewer-v${{ github.event.inputs.version }}-Linux
+        mv dist/ArgoLogViewer ArgoLogViewer-v${{ github.event.inputs.version }}-Linux-Portable
+        chmod +x ArgoLogViewer-v${{ github.event.inputs.version }}-Linux-Portable
+        echo "✅ Portable version created"
     
-    - name: Generate checksum
+    - name: Create DEB package structure
       run: |
-        sha256sum ArgoLogViewer-v${{ github.event.inputs.version }}-Linux > checksums-linux.txt
+        VERSION="${{ github.event.inputs.version }}"
+        DEBDIR="argologviewer_${VERSION}_amd64"
+        
+        # Create directory structure
+        mkdir -p ${DEBDIR}/DEBIAN
+        mkdir -p ${DEBDIR}/usr/local/bin
+        mkdir -p ${DEBDIR}/usr/share/applications
+        mkdir -p ${DEBDIR}/usr/share/icons/hicolor/256x256/apps
+        mkdir -p ${DEBDIR}/usr/share/doc/argologviewer
+        
+        # Copy binary
+        cp ArgoLogViewer-v${VERSION}-Linux-Portable ${DEBDIR}/usr/local/bin/argologviewer
+        chmod +x ${DEBDIR}/usr/local/bin/argologviewer
+        
+        # Create .desktop file
+        cat > ${DEBDIR}/usr/share/applications/argologviewer.desktop << 'EOF'
+        [Desktop Entry]
+        Version=1.0
+        Type=Application
+        Name=Argo Log Viewer
+        Comment=Professional desktop application for viewing Argo Workflow logs
+        Exec=/usr/local/bin/argologviewer
+        Terminal=false
+        Categories=Development;Utility;
+        Keywords=argo;kubernetes;logs;ssh;
+        EOF
+        
+        # Copy icon if exists
+        if [ -f "app/ICON.png" ]; then
+          cp app/ICON.png ${DEBDIR}/usr/share/icons/hicolor/256x256/apps/argologviewer.png
+        fi
+        
+        # Copy documentation
+        cp README.md ${DEBDIR}/usr/share/doc/argologviewer/
+        cp LICENSE.txt ${DEBDIR}/usr/share/doc/argologviewer/copyright
+        
+        # Create control file
+        cat > ${DEBDIR}/DEBIAN/control << EOF
+        Package: argologviewer
+        Version: ${VERSION}
+        Section: utils
+        Priority: optional
+        Architecture: amd64
+        Maintainer: Harshmeet Singh <your-email@example.com>
+        Description: Argo Log Viewer
+         Professional desktop application for viewing Argo Workflow logs via SSH.
+         Features include real-time log streaming, pod search, and Kubernetes operations.
+        Homepage: https://github.com/harshmeetsingh/argo-log-viewer
+        EOF
+        
+        # Create postinst script
+        cat > ${DEBDIR}/DEBIAN/postinst << 'EOF'
+        #!/bin/bash
+        set -e
+        
+        # Update desktop database
+        if command -v update-desktop-database > /dev/null 2>&1; then
+          update-desktop-database -q
+        fi
+        
+        # Update icon cache
+        if command -v gtk-update-icon-cache > /dev/null 2>&1; then
+          gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor || true
+        fi
+        
+        echo "Argo Log Viewer installed successfully!"
+        echo "Run: argologviewer"
+        
+        exit 0
+        EOF
+        
+        chmod +x ${DEBDIR}/DEBIAN/postinst
+        
+        # Create prerm script (uninstaller actions)
+        cat > ${DEBDIR}/DEBIAN/prerm << 'EOF'
+        #!/bin/bash
+        set -e
+        
+        echo "Removing Argo Log Viewer..."
+        
+        exit 0
+        EOF
+        
+        chmod +x ${DEBDIR}/DEBIAN/prerm
+        
+        # Create postrm script (cleanup after uninstall)
+        cat > ${DEBDIR}/DEBIAN/postrm << 'EOF'
+        #!/bin/bash
+        set -e
+        
+        # Update desktop database
+        if command -v update-desktop-database > /dev/null 2>&1; then
+          update-desktop-database -q
+        fi
+        
+        # Update icon cache
+        if command -v gtk-update-icon-cache > /dev/null 2>&1; then
+          gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor || true
+        fi
+        
+        echo "Argo Log Viewer uninstalled successfully!"
+        
+        exit 0
+        EOF
+        
+        chmod +x ${DEBDIR}/DEBIAN/postrm
+        
+        echo "✅ DEB package structure created"
     
-    - name: Upload Linux artifact
+    - name: Build DEB package
+      run: |
+        VERSION="${{ github.event.inputs.version }}"
+        DEBDIR="argologviewer_${VERSION}_amd64"
+        
+        dpkg-deb --build ${DEBDIR}
+        
+        mv ${DEBDIR}.deb ArgoLogViewer-v${VERSION}-Linux-Installer.deb
+        
+        echo "✅ DEB package built"
+        echo "Package info:"
+        dpkg-deb --info ArgoLogViewer-v${VERSION}-Linux-Installer.deb
+    
+    - name: Generate checksums
+      run: |
+        sha256sum ArgoLogViewer-v${{ github.event.inputs.version }}-Linux-Portable > checksums-linux.txt
+        sha256sum ArgoLogViewer-v${{ github.event.inputs.version }}-Linux-Installer.deb >> checksums-linux.txt
+        echo "✅ Checksums generated"
+    
+    - name: Upload Linux artifacts
       uses: actions/upload-artifact@v4
       with:
         name: ArgoLogViewer-Linux
         path: |
-          ArgoLogViewer-v${{ github.event.inputs.version }}-Linux
+          ArgoLogViewer-v${{ github.event.inputs.version }}-Linux-Portable
+          ArgoLogViewer-v${{ github.event.inputs.version }}-Linux-Installer.deb
           checksums-linux.txt
 
   create-release:
@@ -310,9 +463,10 @@ jobs:
           Choose the version for your operating system:
           
           #### 🪟 Windows
-          | Download | Size |
-          |----------|------|
-          | [ArgoLogViewer-v${{ github.event.inputs.version }}-Windows.exe](../../releases/download/v${{ github.event.inputs.version }}/ArgoLogViewer-v${{ github.event.inputs.version }}-Windows.exe) | ~50 MB |
+          | Type | Download | Size | Description |
+          |------|----------|------|-------------|
+          | **Installer** (Recommended) | [ArgoLogViewer-v${{ github.event.inputs.version }}-Windows-Installer.exe](../../releases/download/v${{ github.event.inputs.version }}/ArgoLogViewer-v${{ github.event.inputs.version }}-Windows-Installer.exe) | ~50 MB | Full installer with Start Menu, Desktop shortcut, and uninstaller |
+          | **Portable** | [ArgoLogViewer-v${{ github.event.inputs.version }}-Windows-Portable.exe](../../releases/download/v${{ github.event.inputs.version }}/ArgoLogViewer-v${{ github.event.inputs.version }}-Windows-Portable.exe) | ~50 MB | Single executable, no installation required |
           
           #### 🍎 macOS
           **Choose the correct version for your Mac:**
@@ -330,18 +484,30 @@ jobs:
           - **Apple Silicon:** Shows "Chip: Apple M1/M2/M3/M4"
           
           #### 🐧 Linux
-          | Download | Size |
-          |----------|------|
-          | [ArgoLogViewer-v${{ github.event.inputs.version }}-Linux](../../releases/download/v${{ github.event.inputs.version }}/ArgoLogViewer-v${{ github.event.inputs.version }}-Linux) | ~70 MB |
+          | Type | Download | Size | Description |
+          |------|----------|------|-------------|
+          | **DEB Package** (Recommended) | [ArgoLogViewer-v${{ github.event.inputs.version }}-Linux-Installer.deb](../../releases/download/v${{ github.event.inputs.version }}/ArgoLogViewer-v${{ github.event.inputs.version }}-Linux-Installer.deb) | ~70 MB | For Debian/Ubuntu - install with dpkg, includes uninstaller |
+          | **Portable** | [ArgoLogViewer-v${{ github.event.inputs.version }}-Linux-Portable](../../releases/download/v${{ github.event.inputs.version }}/ArgoLogViewer-v${{ github.event.inputs.version }}-Linux-Portable) | ~70 MB | Single binary, works on all Linux distros |
           
           ---
           
           ### 📋 Installation Instructions
           
           #### Windows
-          1. Download `ArgoLogViewer-v${{ github.event.inputs.version }}-Windows.exe`
-          2. Double-click to run
-          3. Windows Defender may warn you - click "More info" → "Run anyway"
+          
+          **Option 1: Installer (Recommended)**
+          1. Download `ArgoLogViewer-v${{ github.event.inputs.version }}-Windows-Installer.exe`
+          2. Double-click to run the installer
+          3. Follow the installation wizard
+          4. App will be added to Start Menu with uninstaller
+          5. Windows Defender may warn you - click "More info" → "Run anyway"
+          
+          **To Uninstall:** Go to Settings → Apps → Argo Log Viewer → Uninstall
+          
+          **Option 2: Portable**
+          1. Download `ArgoLogViewer-v${{ github.event.inputs.version }}-Windows-Portable.exe`
+          2. Double-click to run (no installation needed)
+          3. You can move it anywhere on your system
           
           #### macOS (DMG - Recommended)
           1. Download the correct DMG file for your Mac type
@@ -359,9 +525,21 @@ jobs:
           **📖 macOS users: See detailed guide:** [MACOS_INSTALLATION.md](../../blob/main/MACOS_INSTALLATION.md)
           
           #### Linux
-          1. Download `ArgoLogViewer-v${{ github.event.inputs.version }}-Linux`
-          2. Make executable: `chmod +x ArgoLogViewer-v${{ github.event.inputs.version }}-Linux`
-          3. Run: `./ArgoLogViewer-v${{ github.event.inputs.version }}-Linux`
+          
+          **Option 1: DEB Package (Ubuntu/Debian/Mint - Recommended)**
+          1. Download `ArgoLogViewer-v${{ github.event.inputs.version }}-Linux-Installer.deb`
+          2. Install: `sudo dpkg -i ArgoLogViewer-v${{ github.event.inputs.version }}-Linux-Installer.deb`
+          3. Fix dependencies if needed: `sudo apt-get install -f`
+          4. Run: `argologviewer` (from anywhere)
+          5. Find in Applications menu
+          
+          **To Uninstall:** `sudo apt remove argologviewer`
+          
+          **Option 2: Portable (All Linux distros)**
+          1. Download `ArgoLogViewer-v${{ github.event.inputs.version }}-Linux-Portable`
+          2. Make executable: `chmod +x ArgoLogViewer-v${{ github.event.inputs.version }}-Linux-Portable`
+          3. Run: `./ArgoLogViewer-v${{ github.event.inputs.version }}-Linux-Portable`
+          4. Optional: Move to PATH: `sudo mv ArgoLogViewer-v${{ github.event.inputs.version }}-Linux-Portable /usr/local/bin/argologviewer`
           
           ---
           ### ✅ Compatibility
@@ -406,10 +584,12 @@ jobs:
         draft: false
         prerelease: false
         files: |
-          ArgoLogViewer-Windows/ArgoLogViewer-v${{ github.event.inputs.version }}-Windows.exe
+          ArgoLogViewer-Windows/ArgoLogViewer-v${{ github.event.inputs.version }}-Windows-Portable.exe
+          ArgoLogViewer-Windows/ArgoLogViewer-v${{ github.event.inputs.version }}-Windows-Installer.exe
           ArgoLogViewer-macOS-AppleSilicon/ArgoLogViewer-v${{ github.event.inputs.version }}-macOS-AppleSilicon.dmg
           ArgoLogViewer-macOS-AppleSilicon/ArgoLogViewer-v${{ github.event.inputs.version }}-macOS-AppleSilicon.zip
-          ArgoLogViewer-Linux/ArgoLogViewer-v${{ github.event.inputs.version }}-Linux
+          ArgoLogViewer-Linux/ArgoLogViewer-v${{ github.event.inputs.version }}-Linux-Portable
+          ArgoLogViewer-Linux/ArgoLogViewer-v${{ github.event.inputs.version }}-Linux-Installer.deb
           CHECKSUMS.txt
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
