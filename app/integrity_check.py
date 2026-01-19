@@ -45,7 +45,7 @@ class IntegrityChecker:
             timeout
         )
         if not is_valid:
-            return False, error_msg or "This software has been discontinued. Please contact support."
+            return False, error_msg or "This software has been discontinued. Please contact support. harshmeetsingh010@gmail.com"
         
         # Check version-specific kill switch (affects only this version)
         current_version = UpdateConfig.get_current_version()
@@ -53,7 +53,7 @@ class IntegrityChecker:
         
         is_valid, error_msg = IntegrityChecker._check_url(version_url, timeout)
         if not is_valid:
-            return False, error_msg or f"Version {current_version} has been deprecated. Please update to the latest version."
+            return False, error_msg or f"Version {current_version} has been deprecated. Please update to the latest version from here https://github.com/harshmeet-1029/Arog-Log-veiwer or contact support. harshmeetsingh010@gmail.com"
         
         return True, None
     
