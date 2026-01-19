@@ -91,10 +91,5 @@ begin
   end;
 end;
 
-function InitializeUninstall(): Boolean;
-begin
-  Result := True;
-  if MsgBox('Do you want to completely remove ' + ExpandConstant('{#MyAppName}') + ' and all of its components?', 
-            mbConfirmation, MB_YESNO) = IDNO then
-    Result := False;
-end;
+// Removed custom uninstall prompt to avoid double confirmation
+// Inno Setup already shows its own confirmation dialog

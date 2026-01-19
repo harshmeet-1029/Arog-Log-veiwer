@@ -1599,7 +1599,7 @@ class MainWindow(QWidget):
 <h3>💡 Tips</h3>
 <ul>
     <li>Search is <b>case-insensitive</b> by default</li>
-    <li>Search bar appears on demand (Ctrl+F) - VS Code style</li>
+    <li>Search bar appears on demand ({ctrl_key}+F) - VS Code style</li>
     <li>Use fullscreen (F11) to maximize log viewing area</li>
     <li>All shortcuts work in both normal and fullscreen modes</li>
     <li>Search wraps around from end to beginning</li>
