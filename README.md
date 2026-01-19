@@ -6,7 +6,7 @@ A production-grade Python desktop GUI application for viewing Argo Workflow logs
 
 - **Stateful SSH Connection Chain**: Maintains proper SSH session through jump host → internal server → sudo context
 - **Custom SSH Folder Configuration**: Point to any SSH folder with your config and keys (NEW!)
-- **OTA Updates**: Automatic update checking with one-click installation (NEW!)
+- **OTA Updates**: Automatic update checking with platform-specific installation (NEW!)
 - **Real-time Resource Monitoring**: Monitor CPU and memory utilization of pods in real-time (NEW!)
 - **Production-Grade Security**: 
   - Read-only operations only (no kubectl apply/delete/exec/scale)
@@ -137,11 +137,27 @@ Point to any SSH folder with your config and keys:
 - Useful for project-specific SSH configs or encrypted drives
 
 #### 2. OTA (Over-The-Air) Updates
-Automatic update checking:
-- Checks for updates on startup (once per 24 hours)
+Automatic update checking with **smart version matching**:
+- Checks for updates on **every app startup**
 - Manual check: `Settings` → `Check for Updates`
-- One-click download and installation
+- **Automatically detects** if you're running portable or installer version
+- **Downloads the matching format** - no duplicate versions!
 - View release notes before updating
+
+**How It Works:**
+- **Portable → Portable**: Running portable .exe? Gets portable update
+- **Installer → Installer**: Installed version? Gets installer update
+- **DEB → DEB**: Installed .deb package? Gets .deb update
+- **Seamless replacement** - no confusion, no duplicates!
+
+**Platform-Specific Installation:**
+- **Windows Installer**: Automatic - downloads and launches installer
+- **Windows Portable**: Downloads portable .exe - shows location to replace your current one
+- **macOS**: Downloads `.dmg`, shows step-by-step guide (Gatekeeper bypass required)
+- **Linux DEB**: Downloads `.deb`, shows GUI/terminal installation steps
+- **Linux Portable**: Downloads portable binary, shows chmod +x instructions
+
+💾 **Your settings & SSH configs are ALWAYS preserved during updates!**
 
 **For complete guide on all features, see: [FEATURES_GUIDE.md](FEATURES_GUIDE.md)**
 

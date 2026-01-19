@@ -375,10 +375,6 @@ class UpdateConfig:
         if not UpdateConfig.CHECK_ON_STARTUP:
             return False
         
-        last_check = AppConfig.get_last_update_check()
-        if last_check is None:
-            return True
-        
-        import time
-        elapsed = time.time() - last_check
-        return elapsed >= UpdateConfig.UPDATE_CHECK_INTERVAL
+        # ALWAYS check for updates on startup (removed 24-hour interval)
+        logger.info("Update check enabled - will check on every app startup")
+        return True

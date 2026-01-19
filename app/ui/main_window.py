@@ -22,6 +22,7 @@ from app.update_checker import UpdateChecker, UpdateInfo
 import os
 import stat
 import sys
+import subprocess
 import webbrowser
 from typing import Optional as Opt_Type
 
@@ -333,7 +334,8 @@ class MainWindow(QWidget):
         self._set_initial_state()
         self._apply_theme(self.current_theme)
         
-        # Check for updates on startup (in background)
+        # Check for updates on EVERY startup (always runs)
+        logger.info("Checking for updates on app startup")
         if UpdateConfig.should_check_for_updates():
             self._check_for_updates_background()
         
@@ -2416,6 +2418,10 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
     
     def _show_update_notification(self, update_info: UpdateInfo):
         """Show a non-intrusive update notification."""
+        import platform
+        current_os = platform.system().lower()
+        is_macos = current_os == 'darwin'
+        
         msg_box = QMessageBox(self)
         msg_box.setWindowTitle("Update Available")
         msg_box.setIcon(QMessageBox.Icon.Information)
@@ -2424,35 +2430,70 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
             msg_box.setIcon(QMessageBox.Icon.Warning)
             msg_box.setText(f"⚠️ Critical Update Available: v{update_info.version}")
         else:
-            msg_box.setText(f"Update Available: v{update_info.version}")
+            msg_box.setText(f"✨ Update Available: v{update_info.version}")
         
-        msg_box.setInformativeText(
-            f"A new version of Argo Log Viewer is available.\n\n"
-            f"Current version: {UpdateConfig.get_current_version()}\n"
-            f"New version: {update_info.version}\n\n"
-            "Would you like to download it now?"
-        )
+        # Platform-specific instructions
+        if is_macos:
+            info_text = (
+                f"A new version is available!\n\n"
+                f"Current version: {UpdateConfig.get_current_version()}\n"
+                f"New version: {update_info.version}\n\n"
+                f"🍎 macOS Installation Process:\n"
+                f"1. Click 'Download' → App downloads .dmg file automatically\n"
+                f"2. Open the .dmg and drag app to Applications\n"
+                f"3. First open: Right-click → Open (bypass Gatekeeper once)\n\n"
+                f"⏱️ Takes ~2 minutes total\n"
+                f"✅ Your settings will be preserved"
+            )
+        else:
+            os_name = "Windows" if current_os == "windows" else "Linux"
+            info_text = (
+                f"A new version is available!\n\n"
+                f"Current version: {UpdateConfig.get_current_version()}\n"
+                f"New version: {update_info.version}\n\n"
+                f"🚀 {os_name} Auto-Installation:\n"
+                f"1. Click 'Download' → App downloads installer\n"
+                f"2. Installer launches automatically\n"
+                f"3. Follow installer prompts → Done!\n\n"
+                f"⏱️ Takes ~1 minute total\n"
+                f"✅ Your settings will be preserved"
+            )
         
-        msg_box.setStandardButtons(
-            QMessageBox.StandardButton.Yes | 
-            QMessageBox.StandardButton.No
-        )
+        msg_box.setInformativeText(info_text)
+        
+        # Add download button
+        download_btn = msg_box.addButton("Download Update", QMessageBox.ButtonRole.AcceptRole)
+        msg_box.addButton("Later", QMessageBox.ButtonRole.RejectRole)
         
         if not update_info.is_critical:
-            skip_btn = msg_box.addButton("Skip This Version", QMessageBox.ButtonRole.RejectRole)
+            skip_btn = msg_box.addButton("Skip This Version", QMessageBox.ButtonRole.DestructiveRole)
         
-        msg_box.setDefaultButton(QMessageBox.StandardButton.Yes)
+        msg_box.setDefaultButton(download_btn)
         
         result = msg_box.exec()
+        clicked_button = msg_box.clickedButton()
         
-        if result == QMessageBox.StandardButton.Yes:
+        if clicked_button == download_btn:
             self._download_update(update_info)
-        elif msg_box.clickedButton() == skip_btn if not update_info.is_critical else False:
+        elif not update_info.is_critical and clicked_button == skip_btn:
             AppConfig.set_skip_version(update_info.version)
             logger.info(f"User skipped version {update_info.version}")
     
     def _show_update_dialog(self, update_info: UpdateInfo):
         """Show detailed update dialog."""
+        # Detect current version type
+        from app.update_checker import UpdateDownloader
+        is_portable = UpdateDownloader.is_running_portable()
+        current_os = UpdateDownloader.get_current_os()
+        
+        # Determine version type string
+        if current_os == 'windows':
+            version_type = "Portable" if is_portable else "Installer"
+        elif current_os == 'linux':
+            version_type = "Portable" if is_portable else "DEB Package"
+        else:
+            version_type = "DMG"
+        
         dialog = QDialog(self)
         dialog.setWindowTitle("Update Available")
         dialog.setMinimumWidth(500)
@@ -2472,12 +2513,24 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
         
         layout.addWidget(title_label)
         
-        # Version info
+        # Version info with type
         version_info = QLabel(
-            f"Current version: {UpdateConfig.get_current_version()}\n"
+            f"Current version: {UpdateConfig.get_current_version()} ({version_type})\n"
             f"New version: {update_info.version}"
         )
         layout.addWidget(version_info)
+        
+        # Auto-match info
+        if update_info.asset_name:
+            auto_match_label = QLabel(f"📦 Will download: {update_info.asset_name}")
+            auto_match_label.setWordWrap(True)
+            auto_match_label.setStyleSheet("background-color: #e8f4f8; padding: 8px; border-radius: 4px; color: #0066cc; font-size: 9pt;")
+            layout.addWidget(auto_match_label)
+            
+            match_explanation = QLabel(f"✨ Auto-matched to your {version_type} version - will replace current installation seamlessly!")
+            match_explanation.setWordWrap(True)
+            match_explanation.setStyleSheet("color: #00aa00; font-size: 9pt; font-style: italic; margin-bottom: 10px;")
+            layout.addWidget(match_explanation)
         
         # Release notes
         notes_label = QLabel("Release Notes:")
@@ -2529,9 +2582,360 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
         dialog.exec()
     
     def _download_update(self, update_info: UpdateInfo):
-        """Open browser to GitHub releases page."""
+        """Download and install update automatically."""
+        logger.info(f"Starting automatic update download for version {update_info.version}")
+        
+        # Check if we have a direct download URL
+        if not update_info.asset_url:
+            logger.warning("No direct download URL available, opening browser")
+            self._open_browser_for_update(update_info)
+            return
+        
+        # Detect version type for better messaging
+        from app.update_checker import UpdateDownloader
+        is_portable = UpdateDownloader.is_running_portable()
+        current_os = UpdateDownloader.get_current_os()
+        
+        # Platform-specific confirmation dialog
+        import platform
+        is_macos = current_os == 'macos'
+        is_windows = current_os == 'windows'
+        is_linux = current_os == 'linux'
+        
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("Download Update")
+        msg_box.setIcon(QMessageBox.Icon.Question)
+        msg_box.setText(f"Ready to download v{update_info.version}")
+        
+        if is_macos:
+            msg_box.setInformativeText(
+                f"📦 File: {update_info.asset_name}\n"
+                f"📥 Download: Automatic (~50MB)\n\n"
+                f"After download completes:\n"
+                f"1. Finder will open showing the .dmg file\n"
+                f"2. Double-click .dmg → Drag app to Applications\n"
+                f"   → This REPLACES your current version ✅\n"
+                f"3. First open: Right-click app → 'Open'\n"
+                f"4. System Settings → Privacy & Security → 'Open Anyway'\n\n"
+                f"💾 Your settings & SSH configs will be preserved!\n\n"
+                f"Continue?"
+            )
+        elif is_linux:
+            if is_portable:
+                msg_box.setInformativeText(
+                    f"📦 File: {update_info.asset_name}\n"
+                    f"📥 Download: Automatic\n\n"
+                    f"After download completes:\n"
+                    f"• You'll get the PORTABLE version (same as you have now)\n"
+                    f"• Make it executable: chmod +x\n"
+                    f"• Run directly or move to replace your current version\n\n"
+                    f"File manager will open to show the downloaded file.\n\n"
+                    f"💾 Your settings & SSH configs will be preserved!\n\n"
+                    f"Continue?"
+                )
+            else:
+                msg_box.setInformativeText(
+                    f"📦 File: {update_info.asset_name}\n"
+                    f"📥 Download: Automatic\n\n"
+                    f"After download completes:\n"
+                    f"• You'll get the DEB PACKAGE (same as you have now)\n"
+                    f"• Double-click to open Software Center\n"
+                    f"• Or: sudo dpkg -i <file>\n"
+                    f"• This REPLACES your current installation ✅\n\n"
+                    f"File manager will open to show the downloaded file.\n\n"
+                    f"💾 Your settings & SSH configs will be preserved!\n\n"
+                    f"Continue?"
+                )
+        else:  # Windows
+            if is_portable:
+                msg_box.setInformativeText(
+                    f"📦 File: {update_info.asset_name}\n"
+                    f"📥 Download: Automatic\n\n"
+                    f"After download:\n"
+                    f"• You'll get the PORTABLE .exe (same as you have now)\n"
+                    f"• Just run it - no installation needed\n"
+                    f"• You can replace your old portable version\n\n"
+                    f"💾 Your settings & SSH configs will be preserved!\n\n"
+                    f"Continue?"
+                )
+            else:
+                msg_box.setInformativeText(
+                    f"📦 File: {update_info.asset_name}\n"
+                    f"📥 Download: Automatic\n"
+                    f"⚙️ Installation: Automatic\n\n"
+                    f"After download:\n"
+                    f"• You'll get the INSTALLER (same as you have now)\n"
+                    f"• Installer will launch automatically\n"
+                    f"• Follow the prompts\n"
+                    f"• This REPLACES your current installation ✅\n"
+                    f"• App will close during installation\n\n"
+                    f"💾 Your settings & SSH configs will be preserved!\n\n"
+                    f"Continue?"
+                )
+        
+        msg_box.setStandardButtons(
+            QMessageBox.StandardButton.Yes | 
+            QMessageBox.StandardButton.No
+        )
+        msg_box.setDefaultButton(QMessageBox.StandardButton.Yes)
+        
+        if msg_box.exec() != QMessageBox.StandardButton.Yes:
+            return
+        
+        # Create progress dialog
+        from PySide6.QtWidgets import QProgressDialog
+        progress = QProgressDialog("Downloading update...", "Cancel", 0, 100, self)
+        progress.setWindowTitle("Updating Argo Log Viewer")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setValue(0)
+        progress.show()
+        
+        # Download in background thread
+        from PySide6.QtCore import QThread, Signal
+        from app.update_checker import UpdateDownloader
+        
+        class DownloadThread(QThread):
+            progress_signal = Signal(int, int)  # downloaded, total
+            finished_signal = Signal(str)  # filepath
+            error_signal = Signal(str)  # error message
+            
+            def __init__(self, download_url):
+                super().__init__()
+                self.download_url = download_url
+            
+            def run(self):
+                try:
+                    def progress_callback(downloaded, total):
+                        self.progress_signal.emit(downloaded, total)
+                    
+                    filepath = UpdateDownloader.download_update(
+                        self.download_url,
+                        progress_callback=progress_callback
+                    )
+                    
+                    if filepath:
+                        self.finished_signal.emit(filepath)
+                    else:
+                        self.error_signal.emit("Download failed")
+                except Exception as e:
+                    self.error_signal.emit(str(e))
+        
+        download_thread = DownloadThread(update_info.asset_url)
+        
+        def on_progress(downloaded, total):
+            if not progress.wasCanceled():
+                percent = int((downloaded / total) * 100) if total > 0 else 0
+                progress.setValue(percent)
+                mb_downloaded = downloaded / 1024 / 1024
+                mb_total = total / 1024 / 1024
+                progress.setLabelText(f"Downloading... {mb_downloaded:.1f}MB / {mb_total:.1f}MB")
+        
+        def on_finished(filepath):
+            progress.close()
+            logger.info(f"Download complete: {filepath}")
+            
+            # Check if macOS - special handling for Gatekeeper
+            if is_macos:
+                # macOS: Show manual installation instructions due to Gatekeeper
+                msg = QMessageBox(self)
+                msg.setWindowTitle("✅ Download Complete - Installation Steps")
+                msg.setIcon(QMessageBox.Icon.Information)
+                msg.setText(f"Downloaded: v{update_info.version}")
+                msg.setInformativeText(
+                    f"📁 Location: {filepath}\n\n"
+                    f"📋 INSTALLATION STEPS:\n\n"
+                    f"1️⃣ Open the .dmg file (Finder will show it)\n"
+                    f"2️⃣ Drag 'ArgoLogViewer' to 'Applications' folder\n"
+                    f"   → This replaces the old version ✅\n\n"
+                    f"3️⃣ macOS Gatekeeper Bypass (ONE TIME ONLY):\n"
+                    f"   • Try to open app → Gets blocked ⛔\n"
+                    f"   • System Settings → Privacy & Security\n"
+                    f"   • Scroll down → Click 'Open Anyway' button ✅\n\n"
+                    f"   OR use Terminal (faster):\n"
+                    f"   xattr -cr /Applications/ArgoLogViewer.app\n\n"
+                    f"4️⃣ Open app normally - Done! 🎉\n\n"
+                    f"💡 After first bypass, opens normally forever!\n"
+                    f"💾 All your settings are preserved!"
+                )
+                
+                # Add detailed explanation
+                msg.setDetailedText(
+                    "Why macOS blocks this app:\n\n"
+                    "This app is not signed with an Apple Developer certificate "
+                    "($99/year required). This is completely normal for free/open-source "
+                    "software.\n\n"
+                    "The Gatekeeper bypass is safe and only needed once. After that, "
+                    "the app opens normally like any other app.\n\n"
+                    "Your config file is stored separately at:\n"
+                    f"{os.path.expanduser('~/.argo-log-viewer/config.json')}\n\n"
+                    "Installing the new version does NOT delete your settings!"
+                )
+                
+                open_btn = msg.addButton("Open in Finder", QMessageBox.ButtonRole.AcceptRole)
+                close_btn = msg.addButton("Close", QMessageBox.ButtonRole.RejectRole)
+                msg.setDefaultButton(open_btn)
+                
+                result = msg.exec()
+                
+                # Open the download location in Finder
+                if msg.clickedButton() == open_btn:
+                    try:
+                        subprocess.Popen(['open', '-R', filepath])
+                    except Exception as e:
+                        logger.warning(f"Could not open Finder: {e}")
+            
+            elif is_linux:
+                # Linux: Show manual installation instructions
+                msg = QMessageBox(self)
+                msg.setWindowTitle("✅ Download Complete - Installation Steps")
+                msg.setIcon(QMessageBox.Icon.Information)
+                msg.setText(f"Downloaded: v{update_info.version}")
+                
+                # Determine file type and provide specific instructions
+                file_name = os.path.basename(filepath).lower()
+                
+                if 'installer.deb' in file_name or file_name.endswith('.deb'):
+                    instructions = (
+                        f"📁 Location: {filepath}\n\n"
+                        f"📋 INSTALLATION STEPS:\n\n"
+                        f"Option 1 (GUI - Easiest): Double-click the file\n"
+                        f"   → Opens Software Center/GDebi\n"
+                        f"   → Click 'Install' button\n"
+                        f"   → Enter your password\n\n"
+                        f"Option 2 (Terminal):\n"
+                        f"   sudo dpkg -i {os.path.basename(filepath)}\n"
+                        f"   sudo apt-get install -f  # Fix dependencies if needed\n\n"
+                        f"After installation:\n"
+                        f"   → Run from terminal: argologviewer\n"
+                        f"   → Or find in Applications menu\n\n"
+                        f"To Uninstall: sudo apt remove argologviewer\n\n"
+                        f"💾 Your settings are preserved!"
+                    )
+                else:
+                    # Portable binary
+                    instructions = (
+                        f"📁 Location: {filepath}\n\n"
+                        f"📋 INSTALLATION STEPS:\n\n"
+                        f"1️⃣ Make the file executable:\n"
+                        f"   chmod +x {os.path.basename(filepath)}\n\n"
+                        f"2️⃣ Run the binary:\n"
+                        f"   ./{os.path.basename(filepath)}\n\n"
+                        f"💡 Optional - Add to PATH:\n"
+                        f"   sudo mv {os.path.basename(filepath)} /usr/local/bin/argologviewer\n"
+                        f"   Then run from anywhere: argologviewer\n\n"
+                        f"💾 Your settings are preserved!"
+                    )
+                
+                msg.setInformativeText(instructions)
+                
+                # Add detailed explanation
+                msg.setDetailedText(
+                    "About Linux Installation:\n\n"
+                    "DEB Package (Debian/Ubuntu/Mint):\n"
+                    "The .deb package integrates with your system and adds the app to your\n"
+                    "applications menu. It can be easily uninstalled using apt/dpkg.\n\n"
+                    "Portable Binary (All Distros):\n"
+                    "A standalone executable that works on any Linux distribution.\n"
+                    "No installation required - just make it executable and run.\n\n"
+                    "Your config file is stored separately at:\n"
+                    f"{os.path.expanduser('~/.argo-log-viewer/config.json')}\n\n"
+                    "Installing the new version does NOT delete your settings!"
+                )
+                
+                open_btn = msg.addButton("Open File Location", QMessageBox.ButtonRole.AcceptRole)
+                close_btn = msg.addButton("Close", QMessageBox.ButtonRole.RejectRole)
+                msg.setDefaultButton(open_btn)
+                
+                result = msg.exec()
+                
+                # Open the download location in file manager
+                if msg.clickedButton() == open_btn:
+                    try:
+                        # Try to open file manager to the downloaded file
+                        subprocess.Popen(['xdg-open', os.path.dirname(filepath)])
+                    except Exception as e:
+                        logger.warning(f"Could not open file manager: {e}")
+            
+            else:
+                # Windows: Check if portable or installer
+                file_name_lower = os.path.basename(filepath).lower()
+                is_portable_file = 'portable' in file_name_lower
+                
+                if is_portable_file:
+                    # Portable version - just show location
+                    msg = QMessageBox(self)
+                    msg.setWindowTitle("✅ Download Complete - Portable Version")
+                    msg.setIcon(QMessageBox.Icon.Information)
+                    msg.setText(f"Downloaded: v{update_info.version}")
+                    msg.setInformativeText(
+                        f"📁 Location: {filepath}\n\n"
+                        f"📋 INSTALLATION STEPS:\n\n"
+                        f"1️⃣ Close this application\n"
+                        f"2️⃣ Replace your old portable .exe with this new one\n"
+                        f"3️⃣ Run the new version\n\n"
+                        f"💡 TIP: You can rename it to remove the version number\n"
+                        f"💾 Your settings are preserved!"
+                    )
+                    
+                    open_btn = msg.addButton("Open File Location", QMessageBox.ButtonRole.AcceptRole)
+                    close_btn = msg.addButton("Close", QMessageBox.ButtonRole.RejectRole)
+                    msg.setDefaultButton(open_btn)
+                    
+                    result = msg.exec()
+                    
+                    if msg.clickedButton() == open_btn:
+                        try:
+                            # Open file explorer to the downloaded file
+                            subprocess.Popen(['explorer', '/select,', filepath])
+                        except Exception as e:
+                            logger.warning(f"Could not open file explorer: {e}")
+                else:
+                    # Installer version - auto-launch
+                    reply = QMessageBox.question(
+                        self,
+                        "Install Update",
+                        f"✅ Download Complete!\n\n"
+                        f"Install v{update_info.version} now?\n\n"
+                        f"The installer will launch and this app will close.\n"
+                        f"Your settings will be preserved.",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                    )
+                    
+                    if reply == QMessageBox.StandardButton.Yes:
+                        from app.update_checker import UpdateDownloader
+                        if UpdateDownloader.install_update(filepath):
+                            # Close application to allow installation
+                            logger.info("Launching installer, closing application")
+                            QApplication.quit()
+                        else:
+                            QMessageBox.critical(
+                                self,
+                                "Installation Failed",
+                                f"Could not launch installer.\n\n"
+                                f"Please install manually from:\n{filepath}"
+                            )
+        
+        def on_error(error_msg):
+            progress.close()
+            logger.error(f"Download error: {error_msg}")
+            QMessageBox.critical(
+                self,
+                "Download Failed",
+                f"Failed to download update:\n{error_msg}\n\n"
+                f"Please try again later or download manually from GitHub."
+            )
+        
+        download_thread.progress_signal.connect(on_progress)
+        download_thread.finished_signal.connect(on_finished)
+        download_thread.error_signal.connect(on_error)
+        download_thread.start()
+    
+    def _open_browser_for_update(self, update_info: UpdateInfo):
+        """Fallback: Open browser to GitHub releases page if auto-download not available."""
         logger.info(f"Opening GitHub releases page: {update_info.download_url}")
         try:
+            import webbrowser
             webbrowser.open(update_info.download_url)
             QMessageBox.information(
                 self,
@@ -2539,8 +2943,8 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
                 "Your browser will open the GitHub releases page.\n\n"
                 "Please download the correct version for your platform:\n"
                 "• Windows: .exe file\n"
-                "• macOS: .dmg or .zip file\n"
-                "• Linux: Linux binary\n\n"
+                "• macOS: .dmg file\n"
+                "• Linux: AppImage or .deb file\n\n"
                 "After downloading, install and restart the application."
             )
         except Exception as e:
