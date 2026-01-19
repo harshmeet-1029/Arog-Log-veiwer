@@ -2,7 +2,7 @@
 OTA (Over-The-Air) Update Checker for Argo Log Viewer.
 
 Created by: Harshmeet Singh (2024-2026)
-Licensed under the MIT License - See LICENSE.txt for details
+Proprietary software - See LICENSE.txt for terms.
 
 This module handles checking for application updates from a remote server.
 """

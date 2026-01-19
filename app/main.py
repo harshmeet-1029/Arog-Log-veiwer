@@ -2,7 +2,9 @@
 Argo Log Viewer - Main Application Entry Point
 
 Created by: Harshmeet Singh (2024-2026)
-Licensed under the MIT License - See LICENSE.txt for details
+
+This software is proprietary and subject to the terms in LICENSE.txt.
+Unauthorized use, modification, or distribution is strictly prohibited.
 """
 import sys
 import logging
@@ -50,9 +52,6 @@ def main():
     # Perform integrity check before starting
     can_run, error_message = check_can_run()
     if not can_run:
-        logger.critical("Integrity check failed - application cannot run")
-        logger.critical(f"Reason: {error_message}")
-        
         # Show error dialog if running with GUI
         try:
             app = QApplication(sys.argv)
@@ -65,8 +64,6 @@ def main():
             pass
         
         sys.exit(1)
-    
-    logger.info("Integrity check passed")
     
     try:
         logger.debug("Creating QApplication instance")

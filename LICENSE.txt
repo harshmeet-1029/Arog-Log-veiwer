@@ -1,21 +1,190 @@
-MIT License
+Restricted Use Software License
 
-Copyright (c) 2024-2026 Harshmeet Singh
+Copyright (c) 2024-2026 Harshmeet Singh. All Rights Reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+================================================================================
+GRANT OF LICENSE
+================================================================================
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+This software and associated documentation files (the "Software") are made 
+available under the following terms and conditions:
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+1. VIEWING AND INSPECTION
+   
+   Permission is hereby granted to view, read, and inspect the source code 
+   of the Software for educational, learning, and reference purposes only.
+
+2. AUTHORIZED ORGANIZATIONAL USE
+   
+   Subject to the terms herein, individuals who are currently employed by or 
+   directly affiliated with technology organizations engaged in e-commerce, 
+   search, or recommendation platform development (including but not limited 
+   to organizations operating under similar business models as Netcore Cloud, 
+   Unbxd, or related entities) may use the Software internally for operational 
+   purposes, provided that:
+   
+   a) Such use is strictly limited to the duration of active employment or 
+      affiliation with said organization;
+   
+   b) The Software is used solely for internal operational workflows and not 
+      for redistribution, sublicensing, or commercial exploitation;
+   
+   c) This license terminates automatically upon termination of employment 
+      or affiliation;
+   
+   d) No modifications to the Software are permitted under this provision;
+   
+   e) Notwithstanding the foregoing, this organizational license grant is 
+      contingent upon and shall remain in effect only during such time as 
+      the original author (Harshmeet Singh) maintains active employment or 
+      affiliation with the licensed organization. Upon cessation of the 
+      author's employment or affiliation with said organization, the author 
+      reserves the unconditional right to revoke, suspend, or terminate this 
+      organizational license at the author's sole discretion, effective 
+      immediately, with or without notice, and without requirement of cause 
+      or justification. Such revocation may be effected through any means 
+      chosen by the author, including but not limited to automated software 
+      mechanisms, remote integrity validation systems, version-specific or 
+      global termination protocols, or any other technical or administrative 
+      means. In such event, all usage rights granted under this Section 2 
+      shall immediately cease and terminate upon implementation of such 
+      revocation mechanism, regardless of whether explicit notice has been 
+      provided to the licensed organization or its personnel.
+
+3. GENERAL RESTRICTIONS
+   
+   Except as expressly permitted in Section 2 above, NO OTHER USE is permitted.
+   Specifically, you may NOT:
+   
+   a) Use the Software for any purpose, commercial or non-commercial;
+   b) Modify, adapt, alter, translate, or create derivative works;
+   c) Copy, reproduce, distribute, publish, or sublicense the Software;
+   d) Reverse engineer, decompile, or disassemble the Software;
+   e) Remove or alter any proprietary notices or labels;
+   f) Transfer, rent, lease, or lend the Software to any third party;
+   g) Use the Software to create any competing product or service.
+
+4. MODIFICATION RIGHTS
+   
+   Only the original author (Harshmeet Singh) retains the exclusive right 
+   to modify, update, enhance, or create derivative works of the Software.
+   
+   No other party, including authorized users under Section 2, may modify 
+   the Software under any circumstances.
+
+================================================================================
+INTELLECTUAL PROPERTY
+================================================================================
+
+The Software is the proprietary property of Harshmeet Singh. All right, title, 
+and interest in and to the Software, including all intellectual property rights 
+therein, are and shall remain exclusively with the author.
+
+This License does not grant any ownership rights, patent rights, trademark 
+rights, or other intellectual property rights to any party.
+
+================================================================================
+TERMINATION
+================================================================================
+
+This License is effective until terminated. Your rights under this License 
+will terminate automatically without notice if you fail to comply with any 
+term herein.
+
+The author expressly reserves the absolute and unconditional right to revoke, 
+suspend, or terminate any and all licenses granted herein (including but not 
+limited to organizational licenses granted under Section 2) at any time, with 
+or without cause, with or without prior notice, and with or without explicit 
+notification to affected parties. 
+
+Such termination may be effected through any means at the author's discretion, 
+including but not limited to:
+- Automated integrity validation systems
+- Remote software revocation mechanisms  
+- Global termination protocols affecting all versions
+- Version-specific termination protocols affecting individual releases
+- Selective organizational license revocation
+- Any other technical, electronic, or administrative means
+
+License termination through automated or remote mechanisms shall be considered 
+effective immediately upon implementation, regardless of whether affected 
+parties have actual knowledge of such termination. It is the licensee's 
+responsibility to ensure compliance with the terms of this License at all times.
+
+Upon termination, you must:
+1. Immediately cease all use of the Software
+2. Delete all copies of the Software in your possession or control
+3. Certify destruction of all copies in writing if requested
+
+Failure to comply with termination requirements may result in legal action 
+to enforce the terms of this License.
+
+================================================================================
+NO WARRANTY
+================================================================================
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR 
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, 
+FITNESS FOR A PARTICULAR PURPOSE, TITLE, AND NON-INFRINGEMENT.
+
+IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER 
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING 
+FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER 
+DEALINGS IN THE SOFTWARE.
+
+================================================================================
+LIMITATION OF LIABILITY
+================================================================================
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL THE 
+AUTHOR BE LIABLE FOR ANY SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL 
+DAMAGES WHATSOEVER (INCLUDING, WITHOUT LIMITATION, DAMAGES FOR LOSS OF 
+BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF BUSINESS INFORMATION, OR 
+ANY OTHER PECUNIARY LOSS) ARISING OUT OF THE USE OF OR INABILITY TO USE 
+THE SOFTWARE.
+
+================================================================================
+COMMERCIAL LICENSING
+================================================================================
+
+For any use not expressly permitted under this License, including commercial 
+use, distribution, modification rights, or integration into other products 
+or services, you must obtain a separate written license from the author.
+
+Contact: Harshmeet Singh
+Email: harshmeetsingh010@gmail.com
+       harshmeet.singh@netcoreunbxd.com
+
+================================================================================
+GOVERNING LAW
+================================================================================
+
+This License shall be governed by and construed in accordance with the laws 
+of India, without regard to its conflict of law provisions.
+
+Any disputes arising under or in connection with this License shall be subject 
+to the exclusive jurisdiction of the courts located in India.
+
+================================================================================
+ENTIRE AGREEMENT
+================================================================================
+
+This License constitutes the entire agreement between the parties concerning 
+the Software and supersedes all prior or contemporaneous understandings or 
+agreements, written or oral, regarding such subject matter.
+
+================================================================================
+ACKNOWLEDGMENT
+================================================================================
+
+BY USING, ACCESSING, OR VIEWING THE SOFTWARE, YOU ACKNOWLEDGE THAT YOU HAVE 
+READ THIS LICENSE, UNDERSTAND IT, AND AGREE TO BE BOUND BY ITS TERMS AND 
+CONDITIONS.
+
+IF YOU DO NOT AGREE TO THESE TERMS, YOU MUST NOT USE, ACCESS, OR VIEW THE 
 SOFTWARE.
+
+================================================================================
+
+Last Updated: January 20, 2026
+License Version: 2.0

@@ -2,6 +2,7 @@
 Integrity and validation checks for Argo Log Viewer.
 
 Created by: Harshmeet Singh (2024-2026)
+Proprietary software - See LICENSE.txt for terms.
 
 This module performs integrity validation on startup.
 """
@@ -38,15 +39,12 @@ class IntegrityChecker:
         Returns:
             Tuple of (is_valid, error_message)
         """
-        logger.debug("Performing integrity check...")
-        
         # Check global kill switch first (affects all versions)
         is_valid, error_msg = IntegrityChecker._check_url(
             IntegrityChecker.GLOBAL_VALIDATION_URL, 
             timeout
         )
         if not is_valid:
-            logger.critical("Global integrity check failed")
             return False, error_msg or "This software has been discontinued. Please contact support."
         
         # Check version-specific kill switch (affects only this version)
@@ -55,10 +53,8 @@ class IntegrityChecker:
         
         is_valid, error_msg = IntegrityChecker._check_url(version_url, timeout)
         if not is_valid:
-            logger.critical(f"Version-specific integrity check failed for v{current_version}")
             return False, error_msg or f"Version {current_version} has been deprecated. Please update to the latest version."
         
-        logger.debug("Integrity check passed")
         return True, None
     
     @staticmethod
@@ -84,7 +80,6 @@ class IntegrityChecker:
             
             with urllib.request.urlopen(req, timeout=timeout) as response:
                 if response.status != 200:
-                    logger.debug(f"Validation server returned status {response.status}, allowing operation")
                     return True, None
                 
                 data = json.loads(response.read().decode('utf-8'))
@@ -102,18 +97,14 @@ class IntegrityChecker:
         except urllib.error.HTTPError as e:
             if e.code == 404:
                 # File doesn't exist - no revocation signal
-                logger.debug(f"Validation file not found at {url} (allowing operation)")
                 return True, None
             else:
-                logger.warning(f"Validation network error (allowing operation): {e}")
                 return True, None
         
-        except urllib.error.URLError as e:
-            logger.debug(f"Validation network error (allowing operation): {e}")
+        except urllib.error.URLError:
             return True, None
         
-        except Exception as e:
-            logger.warning(f"Validation error (allowing operation): {e}")
+        except Exception:
             return True, None
     
     @staticmethod
@@ -175,8 +166,7 @@ class IntegrityChecker:
             
             return {'revoked': False}
             
-        except Exception as e:
-            logger.error(f"Error checking revocation status: {e}")
+        except Exception:
             return {'revoked': False}
 
 

@@ -67,7 +67,6 @@ config.local.py
 
 # Private documentation
 NOTES.md
-IMPLEMENTATION_COMPLETE.md
 
 # Test
 .pytest_cache/

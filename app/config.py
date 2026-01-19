@@ -2,7 +2,7 @@
 Configuration management for Argo Log Viewer.
 
 Created by: Harshmeet Singh (2024-2026)
-Licensed under the MIT License - See LICENSE.txt for details
+Proprietary software - See LICENSE.txt for terms.
 
 SECURITY: This module externalizes hardcoded credentials and connection details.
 In production, consider using environment variables or a secure vault.

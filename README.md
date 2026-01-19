@@ -364,14 +364,26 @@ setup_logging(log_level=logging.DEBUG, log_to_file=True)
 
 ## License
 
-**MIT License**
+**Restricted Use Software License**
 
-Copyright © 2024-2026 Harshmeet Singh
+Copyright © 2024-2026 Harshmeet Singh. All Rights Reserved.
 
-This software is open source and available under the MIT License.
+This software is proprietary and its use is subject to license restrictions.
+
+**Permitted:**
+- Viewing source code for educational purposes
+- Authorized organizational use (see LICENSE.txt for details)
+
+**Not Permitted:**
+- General use without authorization
+- Modification (only author may modify)
+- Redistribution or commercial use
+- Creating derivative works
+
 See [LICENSE.txt](LICENSE.txt) for complete terms and conditions.
 
-**For commercial licensing or permissions, contact:**
+**For licensing inquiries:**
+- Harshmeet Singh
 - harshmeetsingh010@gmail.com
 - harshmeet.singh@netcoreunbxd.com
 
