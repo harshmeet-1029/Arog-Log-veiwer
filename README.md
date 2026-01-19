@@ -364,19 +364,11 @@ setup_logging(log_level=logging.DEBUG, log_to_file=True)
 
 ## License
 
-**Proprietary Software - All Rights Reserved**
+**MIT License**
 
 Copyright © 2024-2026 Harshmeet Singh
 
-This software is proprietary and confidential. Unauthorized copying, forking, 
-distribution, or use without explicit written permission from the copyright 
-holder is strictly prohibited.
-
-**Commercial use, forking, and derivative works require:**
-- Written permission from the author
-- Payment of royalty fees
-- Execution of a separate licensing agreement
-
+This software is open source and available under the MIT License.
 See [LICENSE.txt](LICENSE.txt) for complete terms and conditions.
 
 **For commercial licensing or permissions, contact:**

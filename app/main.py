@@ -1,20 +1,17 @@
 """
 Argo Log Viewer - Main Application Entry Point
 
-Copyright (c) 2024-2026 Harshmeet Singh. All Rights Reserved.
-Proprietary and Confidential.
-
-This software is licensed under a proprietary license.
-Unauthorized copying, distribution, forking, or use is strictly prohibited.
-See LICENSE.txt for details.
+Created by: Harshmeet Singh (2024-2026)
+Licensed under the MIT License - See LICENSE.txt for details
 """
 import sys
 import logging
 import os
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtGui import QIcon
 from app.ui.main_window import MainWindow
 from app.logging_config import setup_logging, get_logger
+from app.integrity_check import check_can_run
 
 # Initialize logger for this module
 logger = get_logger(__name__)
@@ -49,6 +46,27 @@ def main():
     logger.info("=" * 80)
     logger.info("Starting Argo Log Viewer application")
     logger.info("=" * 80)
+    
+    # Perform integrity check before starting
+    can_run, error_message = check_can_run()
+    if not can_run:
+        logger.critical("Integrity check failed - application cannot run")
+        logger.critical(f"Reason: {error_message}")
+        
+        # Show error dialog if running with GUI
+        try:
+            app = QApplication(sys.argv)
+            QMessageBox.critical(
+                None,
+                "Software Error",
+                error_message or "This software is no longer authorized to run."
+            )
+        except:
+            pass
+        
+        sys.exit(1)
+    
+    logger.info("Integrity check passed")
     
     try:
         logger.debug("Creating QApplication instance")
