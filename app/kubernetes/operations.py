@@ -251,6 +251,75 @@ class KubernetesOperations:
             logger.error(f"Error getting pod details: {safe_error}", exc_info=True)
             raise RuntimeError(f"Failed to get pod details: {e}")
     
+    def get_pod_metrics(self, pod_name: str) -> str:
+        """
+        Get real-time CPU and memory metrics for a specific pod.
+        
+        Uses kubectl top pod command to retrieve current resource utilization.
+        Requires metrics-server to be installed in the cluster.
+        
+        Args:
+            pod_name: Name of the pod
+            
+        Returns:
+            Pod metrics as string (CPU and memory usage)
+            
+        Raises:
+            RuntimeError: If SSH connection is not established or metrics-server is not available
+            ValueError: If pod name is invalid
+        """
+        if not pod_name or not pod_name.strip():
+            raise ValueError("Pod name cannot be empty")
+        
+        safe_pod_name = self._sanitize_pod_name(pod_name)
+        
+        # SECURITY: Sanitize for logging
+        safe_pod_name_log = sanitize_for_logging(pod_name)
+        logger.debug(f"Getting metrics for pod: '{safe_pod_name_log}'")
+        
+        # Clean command without timeout (we have separate SSH connection now)
+        command = f"kubectl top pod {shlex.quote(safe_pod_name)} -n {self.namespace} --no-headers"
+        logger.debug(f"Executing: {command}")
+        
+        try:
+            output = self.ssh.execute_command(command, timeout=8.0)
+            # Strip ANSI color codes
+            clean_output = self._strip_ansi_codes(output).strip()
+            
+            logger.debug(f"Raw metrics output: {repr(clean_output[:200])}")
+            
+            # Check for errors
+            if not clean_output or "error" in clean_output.lower() or "not available" in clean_output.lower():
+                logger.warning(f"Metrics not available: {clean_output[:100]}")
+                raise RuntimeError("Metrics server not available")
+            
+            # Remove command echoes if present
+            lines = clean_output.split('\n')
+            result_lines = []
+            for line in lines:
+                line = line.strip()
+                # Skip command echoes and prompts
+                if line and not line.startswith('kubectl') and not line.endswith('$') and not line.endswith('#'):
+                    result_lines.append(line)
+            
+            clean_output = '\n'.join(result_lines)
+            logger.debug(f"Cleaned metrics output: {repr(clean_output)}")
+            
+            return clean_output
+        
+        except TimeoutError:
+            logger.warning(f"SSH timeout for metrics request: {safe_pod_name_log}")
+            raise RuntimeError("Metrics request timed out")
+        
+        except Exception as e:
+            # SECURITY: Sanitize error messages before logging
+            safe_error = sanitize_for_logging(str(e))
+            logger.warning(f"Error getting pod metrics: {safe_error}")
+            
+            if "timeout" in safe_error.lower() or "Timeout" in str(e):
+                raise RuntimeError("Metrics request timed out")
+            raise RuntimeError(f"Metrics unavailable: {e}")
+    
     # -------------------------
     # Private Helper Methods
     # -------------------------

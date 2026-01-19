@@ -7,6 +7,7 @@ A production-grade Python desktop GUI application for viewing Argo Workflow logs
 - **Stateful SSH Connection Chain**: Maintains proper SSH session through jump host → internal server → sudo context
 - **Custom SSH Folder Configuration**: Point to any SSH folder with your config and keys (NEW!)
 - **OTA Updates**: Automatic update checking with one-click installation (NEW!)
+- **Real-time Resource Monitoring**: Monitor CPU and memory utilization of pods in real-time (NEW!)
 - **Production-Grade Security**: 
   - Read-only operations only (no kubectl apply/delete/exec/scale)
   - Input sanitization to prevent command injection
@@ -173,6 +174,8 @@ If you're on macOS and this is your first time opening the app, it will be **BLO
 3. **View Logs**:
    - Double-click any pod in the list
    - Logs will stream in real-time in the bottom panel
+   - **Resource metrics (CPU & Memory) automatically appear above the logs**
+   - Metrics refresh every 3 seconds automatically
    - Click "Stop Log Stream" to stop streaming
 
 4. **Disconnect**: Click "Disconnect" when done
@@ -218,7 +221,7 @@ Application logs are saved to `logs/` directory with timestamps:
 
 View logs for troubleshooting or auditing.
 
-## Safety Features
+### Safety Features
 
 ### Read-Only Operations
 
@@ -226,6 +229,7 @@ Only these kubectl commands are allowed:
 - `kubectl get pods`
 - `kubectl logs`
 - `kubectl describe`
+- `kubectl top` (for resource metrics)
 
 **NO WRITE OPERATIONS**: apply, delete, exec, scale, patch, etc.
 
@@ -243,6 +247,26 @@ All user inputs are sanitized:
 - Proper signal handling for Ctrl+C
 
 ## Troubleshooting
+
+### "Metrics server not available" when monitoring resources
+
+**Problem**: Resource monitoring fails with "Metrics server not available" error.
+
+**Solution**: The resource monitoring feature requires metrics-server to be installed in your Kubernetes cluster.
+
+To install metrics-server:
+```bash
+kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+```
+
+To verify metrics-server is running:
+```bash
+kubectl get deployment metrics-server -n kube-system
+```
+
+Once metrics-server is installed and running, the resource monitoring feature will work.
+
+---
 
 ### macOS: "App can't be opened because Apple cannot check it" ⚠️
 

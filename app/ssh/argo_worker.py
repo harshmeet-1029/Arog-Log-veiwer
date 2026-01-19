@@ -24,6 +24,7 @@ class ArgoWorker(QThread):
     error = Signal(str)            # Error messages
     connected = Signal()           # Connection established
     disconnected = Signal()        # Connection closed
+    metrics = Signal(str)          # Pod metrics (CPU/Memory utilization)
     
     def __init__(
         self, 
@@ -36,9 +37,9 @@ class ArgoWorker(QThread):
         Initialize the worker thread.
         
         Args:
-            action: Action to perform ('connect', 'list_pods', 'logs', 'disconnect')
+            action: Action to perform ('connect', 'list_pods', 'logs', 'disconnect', 'metrics')
             search: Optional search keyword for list_pods
-            pod: Optional pod name for logs action
+            pod: Optional pod name for logs/metrics action
             ssh_manager: Optional existing SSH connection manager (for reuse)
         """
         super().__init__()
@@ -63,6 +64,8 @@ class ArgoWorker(QThread):
                 self._handle_list_pods()
             elif self.action == "logs":
                 self._handle_logs()
+            elif self.action == "metrics":
+                self._handle_metrics()
             elif self.action == "disconnect":
                 self._handle_disconnect()
             else:
@@ -289,6 +292,74 @@ class ArgoWorker(QThread):
             logger.error(f"Failed to stream logs: {e}", exc_info=True)
             error_msg = f"Failed to stream logs: {str(e)}"
             self.output.emit(f"[ERROR] {error_msg}\n")
+            self.error.emit(error_msg)
+    
+    def _handle_metrics(self):
+        """Handle pod metrics action (CPU/Memory monitoring).
+        
+        NOTE: This runs in a separate thread from logs and will not affect log streaming.
+        """
+        logger.info(f"Handling metrics action for pod: {self.pod} (independent thread)")
+        
+        try:
+            if not self.ssh_manager or not self.ssh_manager.is_connected():
+                raise RuntimeError("Not connected. Please connect first.")
+            
+            if not self.pod:
+                raise ValueError("Pod name is required for metrics")
+            
+            # Create Kubernetes operations handler
+            k8s = KubernetesOperations(self.ssh_manager)
+            
+            # Get metrics in a loop until stopped (silent operation)
+            import time
+            failed_attempts = 0
+            max_failed_attempts = 2  # Reduced from 3 to fail faster
+            
+            while not self._should_stop:
+                try:
+                    logger.debug(f"Fetching metrics for {self.pod} (attempt {failed_attempts + 1})")
+                    metrics_output = k8s.get_pod_metrics(self.pod)
+                    
+                    # Emit metrics to UI (separate signal from logs)
+                    self.metrics.emit(metrics_output)
+                    
+                    # Reset failed attempts on success
+                    failed_attempts = 0
+                    
+                    # Wait 5 seconds before next refresh (increased from 3)
+                    for _ in range(50):  # Check every 0.1s for faster response to stop
+                        if self._should_stop:
+                            break
+                        time.sleep(0.1)
+                    
+                except Exception as e:
+                    error_msg = str(e)
+                    failed_attempts += 1
+                    logger.warning(f"Metrics fetch failed (attempt {failed_attempts}/{max_failed_attempts}): {error_msg}")
+                    
+                    # Check if metrics-server is not available or too many failures
+                    if failed_attempts >= max_failed_attempts or \
+                       "Metrics server not available" in error_msg or \
+                       "Metrics API not available" in error_msg or \
+                       "metrics.k8s.io" in error_msg or \
+                       "timed out" in error_msg.lower():
+                        
+                        if "timed out" in error_msg.lower():
+                            self.error.emit("Metrics unavailable - command timed out")
+                        else:
+                            self.error.emit("Metrics server not available in cluster")
+                        break
+                    else:
+                        # Temporary error - wait briefly and retry
+                        logger.debug("Retrying metrics fetch after brief delay...")
+                        time.sleep(2)
+            
+            logger.info("Metrics monitoring stopped (logs unaffected)")
+        
+        except Exception as e:
+            logger.error(f"Failed to start metrics monitoring (logs unaffected): {e}", exc_info=True)
+            error_msg = f"Metrics unavailable: {str(e)}"
             self.error.emit(error_msg)
     
     def _handle_disconnect(self):

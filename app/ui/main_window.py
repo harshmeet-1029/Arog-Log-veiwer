@@ -304,8 +304,13 @@ class MainWindow(QWidget):
         
         # Connection state
         self.ssh_manager: Optional[SSHConnectionManager] = None
+        self.ssh_manager_metrics: Optional[SSHConnectionManager] = None  # Separate connection for metrics
         self.worker: Optional[ArgoWorker] = None
         self.is_connected = False
+        
+        # Metrics state
+        self.current_pod_for_metrics: Optional[str] = None
+        self.is_monitoring_metrics = False
         
         # Update state
         self.pending_update: Opt_Type[UpdateInfo] = None
@@ -734,13 +739,19 @@ class MainWindow(QWidget):
         group = QGroupBox("Live Logs")
         layout = QVBoxLayout()
         
-        # Header with pod label and fullscreen button
+        # Header with pod label, metrics, and fullscreen button
         header_layout = QHBoxLayout()
         
         # Current pod label
         self.current_pod_label = QLabel("No pod selected")
         self.current_pod_label.setStyleSheet("font-weight: bold;")
         header_layout.addWidget(self.current_pod_label)
+        
+        # Compact metrics display (single line, next to pod name)
+        self.metrics_label = QLabel("")
+        # Color will be set by theme
+        self.metrics_label.setVisible(False)
+        header_layout.addWidget(self.metrics_label)
         
         header_layout.addStretch()
         
@@ -756,7 +767,7 @@ class MainWindow(QWidget):
         
         layout.addLayout(header_layout)
         
-        # Container for log output and floating search bar
+        # Container for search bar and log output (for fullscreen support)
         self.log_container = QWidget()
         log_container_layout = QVBoxLayout(self.log_container)
         log_container_layout.setContentsMargins(0, 0, 0, 0)
@@ -854,6 +865,8 @@ class MainWindow(QWidget):
         self.stop_logs_btn.setEnabled(False)
         self.fullscreen_btn.setVisible(False)
         self.save_logs_btn.setVisible(False)
+        self.metrics_label.setVisible(False)
+        self.metrics_label.clear()
         self.status_label.setText("● Disconnected")
         self.status_label.setStyleSheet("color: red; font-weight: bold; font-size: 11pt;")
     
@@ -876,6 +889,9 @@ class MainWindow(QWidget):
         self._set_initial_state()
         self.pod_list.clear()
         self.log_output.clear()
+        self.metrics_label.clear()
+        self.metrics_label.setVisible(False)
+        self.current_pod_for_metrics = None
         self.current_pod_label.setText("No pod selected")
     
     # -------------------------
@@ -914,9 +930,21 @@ class MainWindow(QWidget):
         # Stop any running log stream
         self.stop_log_stream()
         
+        # Stop any running metrics monitoring
+        self.stop_metrics_monitoring()
+        
         self.console_output.append("\n=== Disconnecting ===\n")
         
-        # Create disconnect worker
+        # Disconnect metrics connection if exists
+        if self.ssh_manager_metrics:
+            try:
+                logger.info("Disconnecting metrics SSH connection")
+                self.ssh_manager_metrics.disconnect()
+                self.ssh_manager_metrics = None
+            except Exception as e:
+                logger.warning(f"Error disconnecting metrics SSH: {e}")
+        
+        # Create disconnect worker for main connection
         self.worker = ArgoWorker(action="disconnect", ssh_manager=self.ssh_manager)
         self.worker.output.connect(self._append_console)
         self.worker.disconnected.connect(self._on_disconnected)
@@ -1000,11 +1028,13 @@ class MainWindow(QWidget):
         pod_name = item.text()
         logger.info(f"Opening logs for pod: '{pod_name}'")
         
-        # Stop any existing log stream
+        # Stop any existing log stream and metrics
         self.stop_log_stream()
+        self.stop_metrics_monitoring()
         
         self.log_output.clear()
         self.current_pod_label.setText(f"Viewing logs for: {pod_name}")
+        self.current_pod_for_metrics = pod_name
         
         # Update fullscreen label if in fullscreen mode
         if self.is_fullscreen and hasattr(self, 'fullscreen_pod_label'):
@@ -1012,7 +1042,7 @@ class MainWindow(QWidget):
         
         self.console_output.append(f"\n=== Opening logs for {pod_name} ===\n")
         
-        # Create and start worker
+        # Create and start worker for logs
         self.worker = ArgoWorker(
             action="logs",
             pod=pod_name,
@@ -1027,8 +1057,23 @@ class MainWindow(QWidget):
         self.fullscreen_btn.setVisible(True)
         self.save_logs_btn.setVisible(True)
         
+        # Show metrics label and start auto-monitoring
+        self.metrics_label.setVisible(True)
+        self.metrics_label.setText("📊 Loading metrics...")
+        
         logger.info("Starting logs worker")
         self.worker.start()
+        
+        # Auto-start metrics monitoring for this pod (non-blocking, won't affect logs)
+        # Wait a moment for logs to start, then start metrics in background
+        try:
+            from PySide6.QtCore import QTimer
+            logger.info(f"Scheduling metrics monitoring for: {pod_name}")
+            # Start metrics after 2 seconds to let logs stabilize
+            QTimer.singleShot(2000, self.start_metrics_monitoring)
+        except Exception as e:
+            logger.warning(f"Failed to schedule metrics monitoring (logs unaffected): {e}")
+            self.metrics_label.setText("⚠️ Metrics unavailable")
     
     def stop_log_stream(self):
         """Stop the current log stream."""
@@ -1043,6 +1088,118 @@ class MainWindow(QWidget):
             # Update fullscreen label if in fullscreen mode
             if self.is_fullscreen and hasattr(self, 'fullscreen_pod_label'):
                 self.fullscreen_pod_label.setText("Log stream stopped")
+    
+    def start_metrics_monitoring(self):
+        """Start monitoring CPU and memory for the current pod viewing logs.
+        
+        NOTE: This is a non-critical feature. If it fails, logs will continue to work normally.
+        """
+        if not self.current_pod_for_metrics:
+            logger.warning("No pod selected for metrics monitoring")
+            return
+        
+        # Check if we have a metrics SSH connection
+        if not self.ssh_manager_metrics or not self.ssh_manager_metrics.is_connected():
+            logger.warning("Metrics SSH connection not available")
+            self.metrics_label.setText("│ ⚠️ Metrics unavailable")
+            self.metrics_label.setToolTip("Metrics connection not established")
+            return
+        
+        try:
+            logger.info(f"Starting metrics monitoring for pod: {self.current_pod_for_metrics}")
+            
+            # Stop any active metrics monitoring
+            self.stop_metrics_monitoring()
+            
+            # Show fetching state
+            self.metrics_label.setText("│ 📊 Fetching...")
+            
+            # Create and start worker for metrics (using SEPARATE SSH connection)
+            self.metrics_worker = ArgoWorker(
+                action="metrics",
+                pod=self.current_pod_for_metrics,
+                ssh_manager=self.ssh_manager_metrics  # Use separate connection!
+            )
+            self.metrics_worker.metrics.connect(self._update_metrics_display)
+            self.metrics_worker.error.connect(self._on_metrics_error)
+            
+            self.is_monitoring_metrics = True
+            
+            logger.info("Starting metrics worker (on separate SSH connection)")
+            self.metrics_worker.start()
+            
+        except Exception as e:
+            logger.error(f"Failed to start metrics monitoring (logs unaffected): {e}", exc_info=True)
+            self.metrics_label.setText("│ ⚠️ Metrics unavailable")
+            self.is_monitoring_metrics = False
+    
+    def stop_metrics_monitoring(self):
+        """Stop the current metrics monitoring."""
+        if hasattr(self, 'metrics_worker') and self.metrics_worker and self.metrics_worker.isRunning():
+            logger.info("Stopping metrics monitoring")
+            self.metrics_worker.stop()
+            self.metrics_worker.wait(2000)  # Wait up to 2 seconds
+            self.is_monitoring_metrics = False
+    
+    def _update_metrics_display(self, metrics_text: str):
+        """Update the metrics display with new data - compact single line format."""
+        # Parse the metrics to extract CPU and Memory
+        lines = metrics_text.strip().split('\n')
+        cpu_usage = "N/A"
+        memory_usage = "N/A"
+        
+        for line in lines:
+            line = line.strip()
+            
+            # Skip empty lines
+            if not line:
+                continue
+            
+            # Skip command echoes (lines containing "kubectl" or "top")
+            if "kubectl" in line.lower() or line.startswith("$") or line.startswith("#"):
+                continue
+            
+            parts = line.split()
+            if len(parts) >= 3:
+                # Skip header line
+                if parts[0] == "NAME" or "NAME" in line:
+                    continue
+                
+                # Format should be: POD_NAME CPU(cores) MEMORY(bytes)
+                # Example: henrys-prod-full-jnkw4-processing-step-1060948657   45m          147Mi
+                pod_name_part = parts[0]
+                
+                # Verify this looks like a pod name (contains hyphens)
+                if "-" in pod_name_part and self.current_pod_for_metrics in pod_name_part:
+                    cpu_usage = parts[1] if len(parts) > 1 else "N/A"
+                    memory_usage = parts[2] if len(parts) > 2 else "N/A"
+                    logger.debug(f"Parsed metrics - CPU: {cpu_usage}, Memory: {memory_usage}")
+                    break
+        
+        # Ultra-compact single line format
+        metrics_text = f"│ 📊 CPU: {cpu_usage} • Memory: {memory_usage}"
+        self.metrics_label.setText(metrics_text)
+        
+        # Update fullscreen metrics label if in fullscreen mode
+        if self.is_fullscreen and hasattr(self, 'fullscreen_metrics_label'):
+            self.fullscreen_metrics_label.setText(metrics_text)
+    
+    def _on_metrics_error(self, error_msg: str):
+        """Handle error from metrics worker.
+        
+        NOTE: Metrics errors do NOT affect log streaming - logs will continue to work.
+        """
+        logger.warning(f"Metrics worker error (logs unaffected): {error_msg}")
+        
+        # User-friendly compact error message
+        if "Metrics API not available" in error_msg or "Metrics server not available" in error_msg:
+            self.metrics_label.setText("│ ⚠️ Metrics server not installed")
+            self.metrics_label.setToolTip("Install metrics-server in cluster for resource monitoring. Logs are working normally.")
+        else:
+            self.metrics_label.setText("│ ⚠️ Metrics unavailable")
+            self.metrics_label.setToolTip(f"Error: {error_msg}. Logs are working normally.")
+        
+        self.is_monitoring_metrics = False
     
     def find_in_logs(self):
         """Find text in the log output (case-insensitive)."""
@@ -1226,6 +1383,19 @@ class MainWindow(QWidget):
             header_layout.addWidget(fullscreen_pod_label)
             self.fullscreen_pod_label = fullscreen_pod_label
             
+            # Add metrics label to fullscreen as well
+            fullscreen_metrics_label = QLabel()
+            fullscreen_metrics_label.setText(self.metrics_label.text())
+            # Color based on current theme
+            if self.current_theme.lower() == "dark":
+                metrics_color = "#ffffff"
+            else:
+                metrics_color = "#212121"
+            fullscreen_metrics_label.setStyleSheet(f"color: {metrics_color}; font-size: 11pt; margin-left: 15px; font-weight: bold;")
+            fullscreen_metrics_label.setVisible(self.metrics_label.isVisible())
+            header_layout.addWidget(fullscreen_metrics_label)
+            self.fullscreen_metrics_label = fullscreen_metrics_label
+            
             header_layout.addStretch()
             
             exit_fullscreen_btn = QPushButton("✕ Exit Fullscreen")
@@ -1305,6 +1475,45 @@ class MainWindow(QWidget):
         self._set_connected_state()
         self.connect_btn.setText("Connect")
         self.console_output.append("\n=== Ready for operations ===\n")
+        
+        # Create a separate SSH connection for metrics (non-blocking)
+        try:
+            logger.info("Creating separate SSH connection for metrics monitoring")
+            self.console_output.append("[INFO] Setting up metrics monitoring connection...\n")
+            
+            from PySide6.QtCore import QThread
+            
+            class MetricsConnectionWorker(QThread):
+                def __init__(self, parent):
+                    super().__init__(parent)
+                    self.ssh_manager = None
+                    self.error_msg = None
+                
+                def run(self):
+                    try:
+                        from app.ssh.connection_manager import SSHConnectionManager
+                        self.ssh_manager = SSHConnectionManager()
+                        self.ssh_manager.connect()
+                    except Exception as e:
+                        self.error_msg = str(e)
+            
+            self.metrics_connection_worker = MetricsConnectionWorker(self)
+            
+            def on_metrics_connection_complete():
+                if self.metrics_connection_worker.error_msg:
+                    logger.warning(f"Failed to create metrics connection: {self.metrics_connection_worker.error_msg}")
+                    self.console_output.append("[WARNING] Metrics connection failed - metrics will be unavailable\n")
+                elif self.metrics_connection_worker.ssh_manager:
+                    self.ssh_manager_metrics = self.metrics_connection_worker.ssh_manager
+                    logger.info("Metrics SSH connection established")
+                    self.console_output.append("[OK] Metrics monitoring ready\n")
+            
+            self.metrics_connection_worker.finished.connect(on_metrics_connection_complete)
+            self.metrics_connection_worker.start()
+            
+        except Exception as e:
+            logger.warning(f"Failed to setup metrics connection: {e}")
+        
         QMessageBox.information(self, "Connected", "SSH connection established successfully!")
     
     def _on_disconnected(self):
@@ -1393,6 +1602,14 @@ class MainWindow(QWidget):
         """
         self.console_output.setStyleSheet(console_style)
         self.log_output.setStyleSheet(console_style)
+        
+        # Update metrics label color based on theme
+        if theme_name.lower() == "dark":
+            metrics_color = "#ffffff"  # White for dark mode
+        else:
+            metrics_color = "#212121"  # Black for light mode
+        
+        self.metrics_label.setStyleSheet(f"color: {metrics_color}; font-size: 10pt; margin-left: 15px; font-weight: bold;")
         
         # Update status label colors based on connection state
         if self.is_connected:
@@ -2347,15 +2564,29 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
         if self.is_fullscreen:
             self.exit_fullscreen()
         
+        # Stop any running metrics worker
+        if hasattr(self, 'metrics_worker') and self.metrics_worker and self.metrics_worker.isRunning():
+            logger.info("Stopping metrics worker thread")
+            self.metrics_worker.stop()
+            self.metrics_worker.wait(2000)
+        
         # Stop any running worker
         if self.worker and self.worker.isRunning():
             logger.info("Stopping active worker thread")
             self.worker.stop()
             self.worker.wait(2000)
         
-        # Disconnect SSH
+        # Disconnect metrics SSH
+        if self.ssh_manager_metrics and self.ssh_manager_metrics.is_connected():
+            logger.info("Disconnecting metrics SSH connection")
+            try:
+                self.ssh_manager_metrics.disconnect()
+            except Exception as e:
+                logger.error(f"Error during metrics SSH cleanup: {e}")
+        
+        # Disconnect main SSH
         if self.ssh_manager and self.ssh_manager.is_connected():
-            logger.info("Disconnecting SSH connection")
+            logger.info("Disconnecting main SSH connection")
             try:
                 self.ssh_manager.disconnect()
             except Exception as e:

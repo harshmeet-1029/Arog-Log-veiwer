@@ -119,7 +119,7 @@ class KubernetesConfig:
     DEFAULT_NAMESPACE = "argo"
     
     # Allowed kubectl commands (read-only operations)
-    ALLOWED_COMMANDS = frozenset(['get', 'logs', 'describe'])
+    ALLOWED_COMMANDS = frozenset(['get', 'logs', 'describe', 'top'])
     
     @staticmethod
     def get_namespace() -> str:
