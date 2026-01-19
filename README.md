@@ -137,25 +137,16 @@ Point to any SSH folder with your config and keys:
 - Useful for project-specific SSH configs or encrypted drives
 
 #### 2. OTA (Over-The-Air) Updates
-Automatic update checking with **smart version matching**:
+Automatic update checking:
 - Checks for updates on **every app startup**
 - Manual check: `Settings` → `Check for Updates`
-- **Automatically detects** if you're running portable or installer version
-- **Downloads the matching format** - no duplicate versions!
+- Downloads the correct version for your OS automatically
 - View release notes before updating
 
-**How It Works:**
-- **Portable → Portable**: Running portable .exe? Gets portable update
-- **Installer → Installer**: Installed version? Gets installer update
-- **DEB → DEB**: Installed .deb package? Gets .deb update
-- **Seamless replacement** - no confusion, no duplicates!
-
 **Platform-Specific Installation:**
-- **Windows Installer**: Automatic - downloads and launches installer
-- **Windows Portable**: Downloads portable .exe - shows location to replace your current one
-- **macOS**: Downloads `.dmg`, shows step-by-step guide (Gatekeeper bypass required)
-- **Linux DEB**: Downloads `.deb`, shows GUI/terminal installation steps
-- **Linux Portable**: Downloads portable binary, shows chmod +x instructions
+- **Windows**: Automatic - downloads installer (`.exe`) and launches it after download
+- **macOS**: Automatic download (`.dmg`), then shows step-by-step installation guide (Gatekeeper bypass required)
+- **Linux**: Automatic download (`.deb` package), then shows installation commands
 
 💾 **Your settings & SSH configs are ALWAYS preserved during updates!**
 

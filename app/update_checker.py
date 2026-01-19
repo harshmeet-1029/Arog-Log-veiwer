@@ -72,60 +72,20 @@ class UpdateDownloader:
     def is_running_portable() -> bool:
         """
         Detect if currently running as portable version.
+        SIMPLIFIED - Just returns False (always prefer installer version)
         
         Returns:
-            True if portable, False if installed version
+            False (disabled for now)
         """
-        current_os = UpdateDownloader.get_current_os()
-        
-        if current_os == 'windows':
-            # Installer: Runs from "C:\Program Files\Argo Log Viewer\..."
-            # Portable: Runs from anywhere else (Downloads, Desktop, etc.)
-            exe_path = sys.executable.lower()
-            
-            # Check if running from Program Files (installer)
-            if 'program files' in exe_path or 'program files (x86)' in exe_path:
-                logger.info("Detected: Installed version (Program Files)")
-                return False
-            
-            # Check if filename contains "portable"
-            if 'portable' in exe_path:
-                logger.info("Detected: Portable version (filename contains 'portable')")
-                return True
-            
-            # If not in Program Files and not explicitly portable, assume portable
-            logger.info(f"Detected: Portable version (not in Program Files): {exe_path}")
-            return True
-        
-        elif current_os == 'linux':
-            # Installer (.deb): Runs from /usr/local/bin/ or /usr/bin/
-            # Portable: Runs from anywhere else
-            exe_path = sys.executable.lower()
-            
-            if exe_path.startswith('/usr/local/bin/') or exe_path.startswith('/usr/bin/'):
-                logger.info("Detected: Installed version (system bin directory)")
-                return False
-            
-            # Check if filename contains "portable"
-            if 'portable' in exe_path:
-                logger.info("Detected: Portable version (filename contains 'portable')")
-                return True
-            
-            logger.info(f"Detected: Portable version (not in system directories): {exe_path}")
-            return True
-        
-        elif current_os == 'macos':
-            # macOS always installs to /Applications - no portable version
-            return False
-        
+        # Disabled portable detection to prevent crashes
+        # Always download installer version
         return False
     
     @staticmethod
     def get_asset_for_os(assets: list) -> Optional[Dict[str, str]]:
         """
         Find the correct asset for current OS from GitHub release assets.
-        Automatically detects if user is running portable or installer version
-        and downloads the matching format.
+        SIMPLIFIED - Always downloads installer version.
         
         Args:
             assets: List of asset dictionaries from GitHub API
@@ -134,29 +94,22 @@ class UpdateDownloader:
             Dict with 'name' and 'browser_download_url' or None
         """
         current_os = UpdateDownloader.get_current_os()
-        is_portable = UpdateDownloader.is_running_portable()
         
-        logger.info(f"Finding asset for OS: {current_os}, Portable: {is_portable}")
+        logger.info(f"Finding asset for OS: {current_os}")
         
         for asset in assets:
             name = asset.get('name', '').lower()
             
-            # Windows: Match current version type (portable vs installer)
+            # Windows: Prefer Installer.exe
             if current_os == 'windows':
-                if is_portable and 'portable.exe' in name and name.endswith('.exe'):
-                    logger.info(f"Selected portable version: {asset['name']}")
-                    return {
-                        'name': asset['name'],
-                        'url': asset['browser_download_url']
-                    }
-                elif not is_portable and 'installer.exe' in name and name.endswith('.exe'):
+                if 'installer.exe' in name and name.endswith('.exe'):
                     logger.info(f"Selected installer version: {asset['name']}")
                     return {
                         'name': asset['name'],
                         'url': asset['browser_download_url']
                     }
             
-            # macOS: Always .dmg (no portable version)
+            # macOS: Always .dmg
             elif current_os == 'macos':
                 if '.dmg' in name and name.endswith('.dmg'):
                     logger.info(f"Selected macOS DMG: {asset['name']}")
@@ -165,22 +118,16 @@ class UpdateDownloader:
                         'url': asset['browser_download_url']
                     }
             
-            # Linux: Match current version type (portable vs .deb)
+            # Linux: Prefer .deb package
             elif current_os == 'linux':
-                if is_portable and 'portable' in name and not name.endswith('.deb'):
-                    logger.info(f"Selected portable binary: {asset['name']}")
-                    return {
-                        'name': asset['name'],
-                        'url': asset['browser_download_url']
-                    }
-                elif not is_portable and 'installer.deb' in name and name.endswith('.deb'):
+                if 'installer.deb' in name and name.endswith('.deb'):
                     logger.info(f"Selected DEB package: {asset['name']}")
                     return {
                         'name': asset['name'],
                         'url': asset['browser_download_url']
                     }
         
-        # Fallback: If exact match not found, try alternative formats
+        # Fallback: Try any compatible format
         logger.warning(f"Exact match not found, trying fallback for {current_os}")
         
         for asset in assets:
@@ -198,7 +145,7 @@ class UpdateDownloader:
                     'name': asset['name'],
                     'url': asset['browser_download_url']
                 }
-            elif current_os == 'linux' and ('portable' in name or '.deb' in name):
+            elif current_os == 'linux' and ('.deb' in name or 'portable' in name):
                 logger.info(f"Fallback: Selected Linux package: {asset['name']}")
                 return {
                     'name': asset['name'],
