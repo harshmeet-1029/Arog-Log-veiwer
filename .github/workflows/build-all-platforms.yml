@@ -308,11 +308,11 @@ jobs:
         Section: utils
         Priority: optional
         Architecture: amd64
-        Maintainer: Harshmeet Singh <your-email@example.com>
+        Maintainer: Harshmeet Singh <harshmeetsingh010@gmail.com>
         Description: Argo Log Viewer
          Professional desktop application for viewing Argo Workflow logs via SSH.
          Features include real-time log streaming, pod search, and Kubernetes operations.
-        Homepage: https://github.com/harshmeetsingh/argo-log-viewer
+        Homepage: https://github.com/harshmeet-1029/Arog-Log-veiwer
         EOF
         
         # Create postinst script
