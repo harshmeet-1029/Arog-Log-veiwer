@@ -73,7 +73,11 @@ argo-log-viewer/
 
 Download the latest release from [GitHub Releases](../../releases).
 
-**macOS Users:** See [macOS Installation Guide](MACOS_INSTALLATION.md) for important security information.
+**⚠️ macOS Users - IMPORTANT:** 
+- macOS will **BLOCK this app on first launch** (expected security warning)
+- **You MUST follow special steps to open it** - See: [macOS Installation Guide](MACOS_INSTALLATION.md)
+- **Quick Fix:** System Settings → Privacy & Security → Click "Open Anyway"
+- Or Terminal: `xattr -cr /Applications/ArgoLogViewer.app`
 
 ---
 
@@ -142,8 +146,20 @@ Automatic update checking:
 
 ### Using the Application
 
-**macOS First-Time Setup:**
-If you're on macOS, you'll need to bypass Gatekeeper security. See [macOS Installation Guide](MACOS_INSTALLATION.md) for detailed instructions.
+**⚠️ macOS First-Time Setup - REQUIRED:**
+If you're on macOS and this is your first time opening the app, it will be **BLOCKED by macOS Gatekeeper**. This is normal!
+
+**You MUST do this ONCE:**
+1. Try to open the app → You'll see: *"ArgoLogViewer" can't be opened...*
+2. Go to **System Settings** → **Privacy & Security**
+3. Scroll to **Security** section → Click **"Open Anyway"**
+4. Confirm by clicking **"Open"**
+
+**Detailed guide with screenshots:** [macOS Installation Guide](MACOS_INSTALLATION.md)
+
+---
+
+**Once the app opens successfully:**
 
 1. **Connect**: Click "Connect" button to establish SSH connection chain
    - Watch console output to see connection progress
@@ -228,15 +244,35 @@ All user inputs are sanitized:
 
 ## Troubleshooting
 
-### macOS: "App can't be opened because Apple cannot check it"
+### macOS: "App can't be opened because Apple cannot check it" ⚠️
 
-**Solution:** This is normal for unsigned apps. See [macOS Installation Guide](MACOS_INSTALLATION.md) for bypass instructions.
+**THIS IS THE #1 ISSUE FOR macOS USERS** - The app is blocked by macOS Gatekeeper on first launch.
 
-Quick fix:
+**Solution (Choose ONE method):**
+
+#### Method 1: System Settings (EASIEST - RECOMMENDED)
+1. Try to open the app (you'll see error) → Click "Done"
+2. **System Settings** → **Privacy & Security**
+3. Scroll to **Security** section
+4. Click **"Open Anyway"** button
+5. Confirm by clicking **"Open"**
+6. ✅ Done! App will open normally from now on
+
+#### Method 2: Terminal Command
 ```bash
 xattr -cr /Applications/ArgoLogViewer.app
 ```
-Or right-click the app → "Open" → "Open"
+
+For **macOS Sequoia (15.x)**, if the above doesn't work, also run:
+```bash
+sudo codesign --remove-signature /Applications/ArgoLogViewer.app/Contents/MacOS/ArgoLogViewer
+sudo codesign -s - --deep --force /Applications/ArgoLogViewer.app
+```
+
+#### Method 3: Right-Click (May not work on macOS Sequoia)
+Right-click the app → "Open" → "Open" again
+
+**📖 Full guide with screenshots:** [macOS Installation Guide](MACOS_INSTALLATION.md)
 
 ---
 

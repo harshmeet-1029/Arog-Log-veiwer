@@ -448,13 +448,37 @@ jobs:
           
           ---
           
-          ### ⚠️ macOS Users: Security Notice
+          ### ⚠️ macOS Users: Security Notice (READ THIS FIRST!)
           
-          **macOS will block this app on first launch** because it's not code-signed by Apple. This is normal and expected.
+          **macOS will block this app on first launch** because it's not code-signed by Apple. **This is normal and expected.**
           
-          **Quick Fix:** Right-click the app → "Open" → "Open" again
+          ### 🔓 HOW TO BYPASS (Choose ONE method):
           
-          **For detailed instructions, see:** [macOS Installation Guide](../../blob/main/MACOS_INSTALLATION.md)
+          #### ⭐ Method 1: System Settings (EASIEST - RECOMMENDED)
+          
+          **Works on ALL macOS versions (Especially Sequoia 15.x, Sonoma 14.x, Ventura 13.x)**
+          
+          1. Download DMG → Install to Applications
+          2. Try to open app (you'll see error) → Click "Done"
+          3. **System Settings** → **Privacy & Security** → Scroll to **Security** section
+          4. Click **"Open Anyway"** button
+          5. Confirm → ✅ Done!
+          
+          #### Method 2: Right-Click (May not work on macOS Sequoia 15.x)
+          
+          1. Install DMG → Right-click app → "Open" → "Open" again
+          
+          #### Method 3: Terminal (Advanced)
+          
+          1. Install DMG or ZIP to Applications
+          2. Run: `xattr -cr /Applications/ArgoLogViewer.app`
+          3. For macOS Sequoia 15.x, also run:
+             ```bash
+             sudo codesign --remove-signature /Applications/ArgoLogViewer.app/Contents/MacOS/ArgoLogViewer
+             sudo codesign -s - --deep --force /Applications/ArgoLogViewer.app
+             ```
+          
+          **📖 Detailed guide with screenshots:** [MACOS_INSTALLATION.md](../../blob/main/MACOS_INSTALLATION.md)
           
           ---
           
@@ -510,19 +534,28 @@ jobs:
           3. You can move it anywhere on your system
           
           #### macOS (DMG - Recommended)
-          1. Download the correct DMG file for your Mac type
-          2. Open the DMG file
-          3. Drag "ArgoLogViewer" to Applications folder
-          4. **Right-click the app → "Open"** (first time only, to bypass Gatekeeper)
-          5. Click "Open" again in the confirmation dialog
+          
+          **⚠️ IMPORTANT: You MUST follow these steps to bypass macOS Gatekeeper:**
+          
+          1. Download the correct DMG file for your Mac type (see table above)
+          2. Open the DMG file and drag "ArgoLogViewer" to Applications folder
+          3. **Do NOT double-click the app yet!**
+          4. Try to open the app from Applications (you'll see an error - this is expected)
+          5. **Go to System Settings → Privacy & Security**
+          6. **Scroll down to Security section**
+          7. **Click "Open Anyway" button** (appears after step 4)
+          8. Confirm by clicking "Open"
+          9. ✅ Done! App will now open normally forever
+          
+          **Alternative:** Right-click the app → "Open" → "Open" again (may not work on macOS Sequoia 15.x)
           
           #### macOS (ZIP)
           1. Download and unzip the correct ZIP file
           2. Move to Applications folder
           3. Run in Terminal: `xattr -cr /Applications/ArgoLogViewer.app`
-          4. Open the app normally
+          4. Follow steps 4-9 from DMG method above if needed
           
-          **📖 macOS users: See detailed guide:** [MACOS_INSTALLATION.md](../../blob/main/MACOS_INSTALLATION.md)
+          **📖 macOS users: See detailed guide with screenshots:** [MACOS_INSTALLATION.md](../../blob/main/MACOS_INSTALLATION.md)
           
           #### Linux
           

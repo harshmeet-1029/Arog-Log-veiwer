@@ -38,7 +38,45 @@ When you try to open ArgoLogViewer for the first time, you will see this error:
 
 Choose **ONE** of these methods:
 
-### Method 1: Right-Click to Open (Easiest) ⭐
+### ⭐ Method 1: System Settings Override (RECOMMENDED for macOS 13+)
+
+**This is the EASIEST and MOST RELIABLE method for modern macOS versions (Ventura, Sonoma, Sequoia).**
+
+**Step 1:** Install the DMG
+1. Download the correct DMG file for your Mac
+2. Double-click the DMG to open it
+3. Drag "ArgoLogViewer" to the **Applications** folder
+4. Eject the DMG
+
+**Step 2:** Try to open the app (you'll see an error - this is expected!)
+1. Go to **Applications** folder
+2. Double-click **ArgoLogViewer**
+3. You'll see this error dialog:
+
+![macOS Security Error](app/docs/images/macos-security-dialog.png)
+> *"ArgoLogViewer" can't be opened because Apple cannot check it for malicious software.*
+
+4. Click **"Done"** or **"OK"** to dismiss the error
+
+**Step 3:** Open System Settings and allow the app
+1. Open **System Settings** (or System Preferences on older macOS)
+2. Go to **Privacy & Security**
+3. Scroll down to the **Security** section (bottom half of the page)
+4. You should see: **"ArgoLogViewer" was blocked to protect your Mac.** with an **"Open Anyway"** button next to it
+
+![macOS Privacy & Security Settings](app/docs/images/macos-privacy-security-settings.png)
+
+5. Click **"Open Anyway"**
+6. A confirmation dialog will appear → Click **"Open"** again
+7. ✅ **Done!** The app will now open normally every time
+
+**Why this works:** This method creates a permanent security exception in macOS for this specific app.
+
+**💡 Tip:** If you don't see the "Open Anyway" button, try right-clicking the app and selecting "Open" (Method 2 below).
+
+---
+
+### Method 2: Right-Click to Open (Alternative) ⚙️
 
 **Step 1:** Install the DMG
 1. Download the correct DMG file for your Mac
@@ -55,9 +93,11 @@ Choose **ONE** of these methods:
 
 **Why this works:** Right-clicking tells macOS you trust this specific app.
 
+**⚠️ Note:** On macOS Sequoia (15.x), this method may not work. If right-clicking doesn't work, use Method 1 (System Settings) or Method 3 (Terminal) instead.
+
 ---
 
-### Method 2: Terminal Command (Alternative) 🖥️
+### Method 3: Terminal Command (For Advanced Users) 🖥️
 
 **Step 1:** Install the DMG or ZIP
 - **DMG:** Open it, drag to Applications, eject
@@ -70,31 +110,19 @@ Open **Terminal** and run:
 xattr -cr /Applications/ArgoLogViewer.app
 ```
 
-**Step 3:** Open the app normally
+**Step 3:** Open the app
 - Double-click **ArgoLogViewer** in Applications
-- You may still need to right-click → "Open" on first launch
+- If it still shows an error, use Method 1 (System Settings) or right-click → "Open"
 - ✅ It should open without errors
 
 **Why this works:** This removes the "quarantine" flag macOS adds to downloaded files.
 
----
+**Additional fix for macOS Sequoia (15.x):** If the above doesn't work, also run:
 
-### Method 3: System Settings (macOS Ventura 13+) ⚙️
-
-**Step 1:** Try to open the app
-1. Install from DMG/ZIP as usual
-2. Double-click **ArgoLogViewer** → You'll see the error
-
-**Step 2:** Allow in System Settings
-1. Open **System Settings** (or System Preferences)
-2. Go to **Privacy & Security**
-3. Scroll down to the **Security** section
-4. Look for: *"ArgoLogViewer" was blocked...*
-5. Click **"Open Anyway"**
-6. Confirm by clicking **"Open"**
-7. ✅ Done!
-
-**Why this works:** macOS creates an exception for this app.
+```bash
+sudo codesign --remove-signature /Applications/ArgoLogViewer.app/Contents/MacOS/ArgoLogViewer
+sudo codesign -s - --deep --force /Applications/ArgoLogViewer.app
+```
 
 ---
 
