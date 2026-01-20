@@ -8,6 +8,7 @@ A production-grade Python desktop GUI application for viewing Argo Workflow logs
 - **Custom SSH Folder Configuration**: Point to any SSH folder with your config and keys (NEW!)
 - **OTA Updates**: Automatic update checking with one-click installation (NEW!)
 - **Real-time Resource Monitoring**: Monitor CPU and memory utilization of pods in real-time (NEW!)
+- **Modular Theme System**: Easy-to-extend theme system with Dark, Light, and High Contrast modes (NEW!)
 - **Production-Grade Security**: 
   - Read-only operations only (no kubectl apply/delete/exec/scale)
   - Input sanitization to prevent command injection
@@ -143,7 +144,7 @@ Automatic update checking:
 - One-click download and installation
 - View release notes before updating
 
-**For complete guide on all features, see: [FEATURES_GUIDE.md](FEATURES_GUIDE.md)**
+**📖 For complete guide on all features, see: [FEATURES_GUIDE.md](FEATURES_GUIDE.md)**
 
 ### Using the Application
 

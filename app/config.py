@@ -288,6 +288,52 @@ class AppConfig:
         else:
             config.pop('skip_update_version', None)
         AppConfig.save_config(config)
+    
+    @staticmethod
+    def get_log_buffer_limit() -> int:
+        """
+        Get log buffer limit (max lines to keep in memory).
+        
+        Returns:
+            Maximum number of log lines to keep (0 = unlimited)
+        """
+        config = AppConfig.load_config()
+        return config.get('log_buffer_limit', 0)  # Default: unlimited
+    
+    @staticmethod
+    def set_log_buffer_limit(limit: int) -> None:
+        """
+        Set log buffer limit.
+        
+        Args:
+            limit: Maximum number of log lines (0 = unlimited)
+        """
+        config = AppConfig.load_config()
+        config['log_buffer_limit'] = limit
+        AppConfig.save_config(config)
+    
+    @staticmethod
+    def get_show_memory_warnings() -> bool:
+        """
+        Check if memory warnings should be shown for long-running streams.
+        
+        Returns:
+            True if warnings should be shown
+        """
+        config = AppConfig.load_config()
+        return config.get('show_memory_warnings', True)  # Default: enabled
+    
+    @staticmethod
+    def set_show_memory_warnings(enabled: bool) -> None:
+        """
+        Set whether to show memory warnings.
+        
+        Args:
+            enabled: True to show warnings
+        """
+        config = AppConfig.load_config()
+        config['show_memory_warnings'] = enabled
+        AppConfig.save_config(config)
 
 
 class UpdateConfig:

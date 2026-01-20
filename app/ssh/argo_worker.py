@@ -327,8 +327,9 @@ class ArgoWorker(QThread):
                     # Reset failed attempts on success
                     failed_attempts = 0
                     
-                    # Wait 5 seconds before next refresh (increased from 3)
-                    for _ in range(50):  # Check every 0.1s for faster response to stop
+                    # Wait 10 seconds before next refresh (increased for better performance)
+                    # This prevents excessive UI updates and SSH commands
+                    for _ in range(100):  # Check every 0.1s for faster response to stop
                         if self._should_stop:
                             break
                         time.sleep(0.1)

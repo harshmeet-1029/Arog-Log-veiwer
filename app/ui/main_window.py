@@ -19,6 +19,7 @@ from app.ssh.connection_manager import SSHConnectionManager
 from app.logging_config import get_logger
 from app.config import SecurityConfig, AppConfig, UpdateConfig
 from app.update_checker import UpdateChecker, UpdateInfo
+from app.themes import get_theme, get_available_theme_names, get_theme_name_from_display
 import os
 import stat
 import sys
@@ -28,264 +29,8 @@ from typing import Optional as Opt_Type
 logger = get_logger(__name__)
 
 
-class ThemeManager:
-    """Manages application themes (Dark/Light mode)."""
-    
-    @staticmethod
-    def get_dark_theme() -> dict:
-        """Get dark theme stylesheet and colors."""
-        return {
-            "stylesheet": """
-                QWidget {
-                    background-color: #2b2b2b;
-                    color: #e0e0e0;
-                }
-                QMenuBar {
-                    background-color: #1e1e1e;
-                    color: #e0e0e0;
-                    border-bottom: 1px solid #3c3c3c;
-                    margin-bottom: 10px;
-                    padding: 8px 10px;
-                    spacing: 5px;
-                }
-                QMenuBar::item {
-                    background-color: transparent;
-                    padding: 8px 15px;
-                    margin: 0px 2px;
-                    border-radius: 4px;
-                }
-                QMenuBar::item:selected {
-                    background-color: #3c3c3c;
-                    border-bottom: 1px solid #3c3c3c;
-                }
-                QMenuBar::item:pressed {
-                    background-color: #4a4a4a;
-                }
-                QMenu {
-                    background-color: #2b2b2b;
-                    color: #e0e0e0;
-                    border: 1px solid #3c3c3c;
-                    padding: 5px;
-                }
-                QMenu::item {
-                    padding: 8px 25px;
-                    border-radius: 3px;
-                }
-                QMenu::item:selected {
-                    background-color: #3c3c3c;
-                }
-                QGroupBox {
-                    border: 1px solid #3c3c3c;
-                    border-radius: 5px;
-                    margin-top: 10px;
-                    padding-top: 10px;
-                    font-weight: bold;
-                    color: #e0e0e0;
-                }
-                QGroupBox::title {
-                    subcontrol-origin: margin;
-                    left: 10px;
-                    padding: 0 5px;
-                }
-                QPushButton {
-                    background-color: #3c3c3c;
-                    color: #e0e0e0;
-                    border: 1px solid #555;
-                    padding: 5px 15px;
-                    border-radius: 3px;
-                }
-                QPushButton:hover {
-                    background-color: #4a4a4a;
-                }
-                QPushButton:pressed {
-                    background-color: #2a2a2a;
-                }
-                QPushButton:disabled {
-                    background-color: #2b2b2b;
-                    color: #666;
-                }
-                QLineEdit {
-                    background-color: #3c3c3c;
-                    color: #e0e0e0;
-                    border: 1px solid #555;
-                    padding: 5px;
-                    border-radius: 3px;
-                }
-                QTextEdit {
-                    background-color: #1e1e1e;
-                    color: #d4d4d4;
-                    border: 1px solid #3c3c3c;
-                }
-                QListWidget {
-                    background-color: #3c3c3c;
-                    color: #e0e0e0;
-                    border: 1px solid #555;
-                }
-                QListWidget::item:selected {
-                    background-color: #0d47a1;
-                }
-                QComboBox {
-                    background-color: #3c3c3c;
-                    color: #e0e0e0;
-                    border: 1px solid #555;
-                    padding: 5px;
-                    border-radius: 3px;
-                }
-                QComboBox::drop-down {
-                    border: none;
-                }
-                QComboBox::down-arrow {
-                    image: none;
-                    border-left: 5px solid transparent;
-                    border-right: 5px solid transparent;
-                    border-top: 5px solid #e0e0e0;
-                    margin-right: 5px;
-                }
-                QLabel {
-                    color: #e0e0e0;
-                }
-                /* VS Code style search bar */
-                #log_search_bar {
-                    background-color: #2b2b2b;
-                    border: 1px solid #0d47a1;
-                    border-radius: 3px;
-                }
-            """,
-            "console_bg": "#1e1e1e",
-            "console_fg": "#d4d4d4"
-        }
-    
-    @staticmethod
-    def get_light_theme() -> dict:
-        """Get light theme stylesheet and colors."""
-        return {
-            "stylesheet": """
-                QWidget {
-                    background-color: #f5f5f5;
-                    color: #212121;
-                }
-                QMenuBar {
-                    background-color: #ffffff;
-                    color: #212121;
-                    border-bottom: 1px solid #2196f3;
-                    margin-bottom: 10px;
-                    padding: 10px 10px;
-                    spacing: 5px;
-                }
-                QMenuBar::item {
-                    background-color: transparent;
-                    padding: 8px 15px;
-                    margin: 0px 2px;
-                    border-radius: 4px;
-                }
-                QMenuBar::item:selected {
-                    background-color: #e0e0e0;
-                    border-bottom: 2px solid #2196f3;
-                }
-                QMenuBar::item:pressed {
-                    background-color: #d0d0d0;
-                }
-                QMenu {
-                    background-color: #ffffff;
-                    color: #212121;
-                    border: 1px solid #ccc;
-                    padding: 5px;
-                }
-                QMenu::item {
-                    padding: 8px 25px;
-                    border-radius: 3px;
-                }
-                QMenu::item:selected {
-                    background-color: #e0e0e0;
-                }
-                QGroupBox {
-                    border: 1px solid #ccc;
-                    border-radius: 5px;
-                    margin-top: 10px;
-                    padding-top: 10px;
-                    font-weight: bold;
-                    color: #212121;
-                }
-                QGroupBox::title {
-                    subcontrol-origin: margin;
-                    left: 10px;
-                    padding: 0 5px;
-                }
-                QPushButton {
-                    background-color: #ffffff;
-                    color: #212121;
-                    border: 1px solid #ccc;
-                    padding: 5px 15px;
-                    border-radius: 3px;
-                }
-                QPushButton:hover {
-                    background-color: #e8e8e8;
-                }
-                QPushButton:pressed {
-                    background-color: #d0d0d0;
-                }
-                QPushButton:disabled {
-                    background-color: #f5f5f5;
-                    color: #999;
-                }
-                QLineEdit {
-                    background-color: #ffffff;
-                    color: #212121;
-                    border: 1px solid #ccc;
-                    padding: 5px;
-                    border-radius: 3px;
-                }
-                QTextEdit {
-                    background-color: #ffffff;
-                    color: #212121;
-                    border: 1px solid #ccc;
-                }
-                QListWidget {
-                    background-color: #ffffff;
-                    color: #212121;
-                    border: 1px solid #ccc;
-                }
-                QListWidget::item:selected {
-                    background-color: #2196f3;
-                    color: #ffffff;
-                }
-                QComboBox {
-                    background-color: #ffffff;
-                    color: #212121;
-                    border: 1px solid #ccc;
-                    padding: 5px;
-                    border-radius: 3px;
-                }
-                QComboBox::drop-down {
-                    border: none;
-                }
-                QComboBox::down-arrow {
-                    image: none;
-                    border-left: 5px solid transparent;
-                    border-right: 5px solid transparent;
-                    border-top: 5px solid #212121;
-                    margin-right: 5px;
-                }
-                QLabel {
-                    color: #212121;
-                }
-                /* VS Code style search bar */
-                #log_search_bar {
-                    background-color: #f5f5f5;
-                    border: 1px solid #2196f3;
-                    border-radius: 3px;
-                }
-            """,
-            "console_bg": "#ffffff",
-            "console_fg": "#212121"
-        }
-    
-    @staticmethod
-    def get_theme(theme_name: str) -> dict:
-        """Get theme by name."""
-        if theme_name.lower() == "light":
-            return ThemeManager.get_light_theme()
-        return ThemeManager.get_dark_theme()
+# NOTE: Theme styling is now managed in app/themes.py
+# This makes it easy to add new themes without editing this file!
 
 
 class MainWindow(QWidget):
@@ -311,6 +56,11 @@ class MainWindow(QWidget):
         # Metrics state
         self.current_pod_for_metrics: Optional[str] = None
         self.is_monitoring_metrics = False
+        self._last_metrics_update = 0  # Timestamp of last metrics UI update (throttling)
+        
+        # Stream monitoring state
+        self._stream_start_time = None  # Track when log streaming started
+        self._last_memory_warning_time = 0  # Track last memory warning
         
         # Update state
         self.pending_update: Opt_Type[UpdateInfo] = None
@@ -587,6 +337,11 @@ class MainWindow(QWidget):
         ssh_config_settings_action.triggered.connect(self._show_ssh_folder_config_dialog)
         settings_menu.addAction(ssh_config_settings_action)
         
+        advanced_settings_action = QAction("Advanced Settings...", self)
+        advanced_settings_action.setStatusTip("Configure advanced options (log buffer, warnings)")
+        advanced_settings_action.triggered.connect(self._show_advanced_settings_dialog)
+        settings_menu.addAction(advanced_settings_action)
+        
         settings_menu.addSeparator()
         
         check_updates_action = QAction("Check for Updates", self)
@@ -597,13 +352,20 @@ class MainWindow(QWidget):
         # Help menu with shortcuts
         help_menu = menu_bar.addMenu("Help")
         
-        shortcuts_action = QAction("Keyboard Shortcuts", self)
+        user_guide_action = QAction("📖 User Guide (How to Use)", self)
+        user_guide_action.setStatusTip("Complete guide on how to use all features")
+        user_guide_action.triggered.connect(self._show_user_guide_dialog)
+        help_menu.addAction(user_guide_action)
+        
+        help_menu.addSeparator()
+        
+        shortcuts_action = QAction("⌨️ Keyboard Shortcuts", self)
         shortcuts_action.setStatusTip("View keyboard shortcuts")
         shortcuts_action.triggered.connect(self._show_shortcuts_dialog)
         help_menu.addAction(shortcuts_action)
         
         # SSH Configuration Guide
-        ssh_config_action = QAction("SSH Configuration Guide", self)
+        ssh_config_action = QAction("🔧 SSH Configuration Guide", self)
         ssh_config_action.setStatusTip("View SSH setup instructions for your OS")
         ssh_config_action.triggered.connect(self._show_ssh_config_dialog)
         help_menu.addAction(ssh_config_action)
@@ -634,13 +396,13 @@ class MainWindow(QWidget):
         
         layout.addStretch()
         
-        # Theme selector (compact)
+        # Theme selector (compact) - auto-populated from themes.py
         theme_label = QLabel("Theme:")
         theme_label.setStyleSheet("font-size: 9pt;")
         layout.addWidget(theme_label)
         self.theme_combo = QComboBox()
-        self.theme_combo.addItems(["Dark", "Light"])
-        self.theme_combo.setMinimumWidth(80)
+        self.theme_combo.addItems(get_available_theme_names())  # Dynamically loaded from themes.py
+        self.theme_combo.setMinimumWidth(120)  # Wider for longer theme names
         self.theme_combo.setMinimumHeight(25)
         self.theme_combo.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         self.theme_combo.currentTextChanged.connect(self._on_theme_changed)
@@ -756,8 +518,17 @@ class MainWindow(QWidget):
         # Retry button for metrics (compact, next to metrics)
         self.retry_metrics_btn = QPushButton("🔄")
         self.retry_metrics_btn.setToolTip("Retry fetching metrics")
-        self.retry_metrics_btn.setMaximumWidth(35)
-        self.retry_metrics_btn.setMaximumHeight(25)
+        self.retry_metrics_btn.setFixedSize(32, 28)  # Fixed size to prevent cutting
+        self.retry_metrics_btn.setStyleSheet("""
+            QPushButton {
+                font-size: 16px;
+                padding: 0px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: rgba(255, 255, 255, 0.1);
+            }
+        """)
         self.retry_metrics_btn.setVisible(False)
         self.retry_metrics_btn.clicked.connect(self.retry_metrics)
         header_layout.addWidget(self.retry_metrics_btn)
@@ -834,6 +605,13 @@ class MainWindow(QWidget):
         # Use monospace font for logs
         log_font = QFont("Courier New", 9)
         self.log_output.setFont(log_font)
+        
+        # Initialize with unlimited buffer (default behavior)
+        # User can change this in Settings > Advanced Settings
+        buffer_limit = AppConfig.get_log_buffer_limit()
+        if buffer_limit > 0:
+            self.log_output.document().setMaximumBlockCount(buffer_limit)
+        # else: unlimited (Qt default - no limit)
         
         log_container_layout.addWidget(self.log_output)
         layout.addWidget(self.log_container)
@@ -1076,6 +854,10 @@ class MainWindow(QWidget):
         logger.info("Starting logs worker")
         self.worker.start()
         
+        # Track stream start time for memory warnings
+        import time
+        self._stream_start_time = time.time()
+        
         # Auto-start metrics monitoring for this pod (non-blocking, won't affect logs)
         # Wait a moment for logs to start, then start metrics in background
         try:
@@ -1088,9 +870,9 @@ class MainWindow(QWidget):
             self.metrics_label.setText("⚠️ Metrics unavailable")
     
     def stop_log_stream(self):
-        """Stop the current log stream and unselect the pod."""
+        """Stop the current log stream but keep logs visible."""
         if self.worker and self.worker.isRunning():
-            logger.info("Stopping log stream and unselecting pod")
+            logger.info("Stopping log stream")
             self.console_output.append("\n[INFO] Stopping log stream...\n")
             self.worker.stop()
             self.worker.wait(2000)  # Wait up to 2 seconds
@@ -1098,9 +880,8 @@ class MainWindow(QWidget):
         # Stop metrics monitoring
         self.stop_metrics_monitoring()
         
-        # Disable and hide all pod-related UI elements
+        # Disable stop button (no longer streaming)
         self.stop_logs_btn.setEnabled(False)
-        self.current_pod_label.setText("No pod selected")
         self.current_pod_for_metrics = None
         
         # Hide metrics and retry button
@@ -1108,19 +889,11 @@ class MainWindow(QWidget):
         self.metrics_label.clear()
         self.retry_metrics_btn.setVisible(False)
         
-        # Hide fullscreen and save buttons
-        self.fullscreen_btn.setVisible(False)
-        self.save_logs_btn.setVisible(False)
+        # Reset stream tracking
+        self._stream_start_time = None
         
-        # Unselect pod in list
-        self.pod_list.clearSelection()
-        
-        # Clear log output
-        self.log_output.clear()
-        
-        # Update fullscreen label if in fullscreen mode
-        if self.is_fullscreen and hasattr(self, 'fullscreen_pod_label'):
-            self.fullscreen_pod_label.setText("No pod selected")
+        # Keep logs visible, keep pod label, keep fullscreen/save buttons
+        # User can still view, save, or fullscreen the stopped logs
     
     def start_metrics_monitoring(self):
         """Start monitoring CPU and memory for the current pod viewing logs.
@@ -1192,7 +965,21 @@ class MainWindow(QWidget):
         QTimer.singleShot(500, self.start_metrics_monitoring)  # Quick retry
     
     def _update_metrics_display(self, metrics_text: str):
-        """Update the metrics display with new data - compact single line format."""
+        """Update the metrics display with new data - compact single line format.
+        
+        PERFORMANCE: Throttle UI updates to prevent freezing during heavy log streaming.
+        """
+        import time
+        
+        # Throttle metrics UI updates to max once per 2 seconds
+        # This prevents UI freezing when logs are streaming heavily
+        current_time = time.time()
+        if current_time - self._last_metrics_update < 2.0:
+            # Skip this update, too soon since last one
+            return
+        
+        self._last_metrics_update = current_time
+        
         # Parse the metrics to extract CPU and Memory
         lines = metrics_text.strip().split('\n')
         cpu_usage = "N/A"
@@ -1605,6 +1392,7 @@ class MainWindow(QWidget):
     def _append_log(self, text):
         """Append text to log output and update search results if active."""
         # Smart scroll: Check if user is actually at the bottom using scrollbar position
+        # IMPORTANT: Check BEFORE adding new text, as maximum will change!
         scrollbar = self.log_output.verticalScrollBar()
         was_at_bottom = scrollbar.value() >= scrollbar.maximum() - 10  # Allow small margin
         
@@ -1612,8 +1400,13 @@ class MainWindow(QWidget):
         self.log_output.moveCursor(QTextCursor.MoveOperation.End)
         self.log_output.insertPlainText(text)
         
-        # If there's an active search, update occurrences
-        if self.current_search_term:
+        # Memory warning check (every 30 minutes)
+        self._check_memory_warning()
+        
+        # PERFORMANCE FIX: Only update search if user has scrolled up or explicitly searching
+        # Don't re-index on every log line while streaming (expensive!)
+        if self.current_search_term and not was_at_bottom:
+            # Only update search when user is actively viewing search results
             old_count = len(self.search_occurrences)
             self.search_occurrences = self._find_all_occurrences(self.current_search_term)
             new_count = len(self.search_occurrences)
@@ -1628,51 +1421,56 @@ class MainWindow(QWidget):
             
             if new_count > old_count:
                 logger.debug(f"Search results updated: {old_count} -> {new_count} occurrences")
-        else:
-            # No active search - ONLY auto-scroll if user was already at the bottom
-            if was_at_bottom:
-                self.log_output.moveCursor(QTextCursor.MoveOperation.End)
-                scrollbar.setValue(scrollbar.maximum())  # Ensure we're at the very bottom
+        
+        # Smart scroll: Only auto-scroll if user was at bottom before new text arrived
+        if was_at_bottom:
+            # Scroll to the end
+            self.log_output.moveCursor(QTextCursor.MoveOperation.End)
+            self.log_output.ensureCursorVisible()
     
     # -------------------------
     # Theme Management
     # -------------------------
     
     def _apply_theme(self, theme_name: str):
-        """Apply the selected theme to the application."""
+        """Apply the selected theme to the application (from themes.py)."""
         logger.info(f"Applying theme: {theme_name}")
-        theme = ThemeManager.get_theme(theme_name)
-        self.setStyleSheet(theme["stylesheet"])
+        
+        # Get theme class from themes.py
+        theme_class = get_theme(theme_name)
+        
+        # Apply main stylesheet
+        self.setStyleSheet(theme_class.get_main_stylesheet())
         
         # Update console and log output colors
         console_style = f"""
             QTextEdit {{
-                background-color: {theme["console_bg"]};
-                color: {theme["console_fg"]};
+                background-color: {theme_class.log_background};
+                color: {theme_class.log_text};
             }}
         """
         self.console_output.setStyleSheet(console_style)
         self.log_output.setStyleSheet(console_style)
         
-        # Update metrics label color based on theme
-        if theme_name.lower() == "dark":
-            metrics_color = "#ffffff"  # White for dark mode
-        else:
-            metrics_color = "#212121"  # Black for light mode
+        # Update metrics label color (theme-aware)
+        self.metrics_label.setStyleSheet(
+            f"color: {theme_class.metrics_text}; "
+            f"font-size: 10pt; margin-left: 15px; font-weight: bold;"
+        )
         
-        self.metrics_label.setStyleSheet(f"color: {metrics_color}; font-size: 10pt; margin-left: 15px; font-weight: bold;")
-        
-        # Update status label colors based on connection state
+        # Update status label colors based on connection state (theme-aware)
         if self.is_connected:
-            self.status_label.setStyleSheet("color: green; font-weight: bold;")
+            self.status_label.setStyleSheet(f"color: {theme_class.success_color}; font-weight: bold;")
         else:
-            self.status_label.setStyleSheet("color: red; font-weight: bold;")
+            self.status_label.setStyleSheet(f"color: {theme_class.error_color}; font-weight: bold;")
     
-    def _on_theme_changed(self, theme_name: str):
-        """Handle theme selection change."""
-        self.current_theme = theme_name.lower()
+    def _on_theme_changed(self, display_name: str):
+        """Handle theme selection change (receives display name from dropdown)."""
+        # Convert display name (e.g., "Dark Mode") to internal name (e.g., "dark")
+        theme_name = get_theme_name_from_display(display_name)
+        self.current_theme = theme_name
         self._apply_theme(self.current_theme)
-        logger.info(f"Theme changed to: {self.current_theme}")
+        logger.info(f"Theme changed to: {self.current_theme} ({display_name})")
     
     # -------------------------
     # About Dialog
@@ -2602,6 +2400,446 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
                 f"Could not open releases page:\n{update_info.download_url}\n\n"
                 "Please visit GitHub manually to download the update."
             )
+    
+    def _check_memory_warning(self):
+        """Check if we should show a memory warning for long-running streams."""
+        if not AppConfig.get_show_memory_warnings():
+            return
+        
+        if not self._stream_start_time:
+            return
+        
+        import time
+        current_time = time.time()
+        stream_duration = current_time - self._stream_start_time
+        
+        # Show warning every 30 minutes (1800 seconds)
+        time_since_last_warning = current_time - self._last_memory_warning_time
+        
+        if stream_duration > 1800 and time_since_last_warning > 1800:
+            # Get line count
+            line_count = self.log_output.document().blockCount()
+            
+            # Only warn if there are many lines
+            if line_count > 10000:
+                self._last_memory_warning_time = current_time
+                self._show_memory_warning(stream_duration, line_count)
+    
+    def _show_memory_warning(self, duration_seconds: float, line_count: int):
+        """Show memory warning dialog for long-running streams."""
+        hours = int(duration_seconds / 3600)
+        minutes = int((duration_seconds % 3600) / 60)
+        
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Icon.Information)
+        msg.setWindowTitle("Long-Running Stream Detected")
+        msg.setText(f"This log stream has been running for {hours}h {minutes}m")
+        msg.setInformativeText(
+            f"Current log lines: {line_count:,}\n\n"
+            f"Long streams use more memory. You can:\n"
+            f"• Save logs now and restart stream\n"
+            f"• Continue streaming (unlimited logs)\n"
+            f"• Configure buffer limit in Settings > Advanced"
+        )
+        
+        save_btn = msg.addButton("Save Logs Now", QMessageBox.ButtonRole.ActionRole)
+        continue_btn = msg.addButton("Continue Streaming", QMessageBox.ButtonRole.AcceptRole)
+        settings_btn = msg.addButton("Settings", QMessageBox.ButtonRole.ActionRole)
+        dont_show_btn = msg.addButton("Don't Show Again", QMessageBox.ButtonRole.RejectRole)
+        
+        msg.exec()
+        
+        clicked = msg.clickedButton()
+        if clicked == save_btn:
+            self.save_current_logs()
+        elif clicked == settings_btn:
+            self._show_advanced_settings_dialog()
+        elif clicked == dont_show_btn:
+            AppConfig.set_show_memory_warnings(False)
+    
+    def _show_advanced_settings_dialog(self):
+        """Show advanced settings dialog for log buffer and warnings."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Advanced Settings")
+        dialog.setMinimumWidth(500)
+        
+        layout = QVBoxLayout()
+        
+        # Description
+        desc = QLabel(
+            "<b>Log Buffer Settings</b><br>"
+            "Configure how logs are managed during streaming."
+        )
+        layout.addWidget(desc)
+        
+        # Buffer limit option
+        from PySide6.QtWidgets import QRadioButton, QSpinBox
+        
+        buffer_group = QGroupBox("Log Buffer Limit")
+        buffer_layout = QVBoxLayout()
+        
+        current_limit = AppConfig.get_log_buffer_limit()
+        
+        unlimited_radio = QRadioButton("Unlimited (Keep all logs)")
+        unlimited_radio.setChecked(current_limit == 0)
+        buffer_layout.addWidget(unlimited_radio)
+        
+        limited_radio = QRadioButton("Limited (For very long streams)")
+        limited_radio.setChecked(current_limit > 0)
+        buffer_layout.addWidget(limited_radio)
+        
+        limit_spin = QSpinBox()
+        limit_spin.setMinimum(10)  # Allow very small values for testing
+        limit_spin.setMaximum(1000000)
+        limit_spin.setSingleStep(100)  # Smaller steps for fine control
+        # Default to a reasonable value (50k lines) when switching to Limited mode
+        limit_spin.setValue(current_limit if current_limit > 0 else 50000)
+        limit_spin.setSuffix(" lines")
+        limit_spin.setEnabled(current_limit > 0)
+        buffer_layout.addWidget(limit_spin)
+        
+        limited_radio.toggled.connect(limit_spin.setEnabled)
+        
+        info_label = QLabel(
+            "<small>"
+            "<b>Unlimited:</b> Keeps all logs (default - recommended for complete log saving)<br>"
+            "<b>Limited:</b> Keeps only recent lines (saves memory for 24hr+ streams)"
+            "</small>"
+        )
+        info_label.setWordWrap(True)
+        buffer_layout.addWidget(info_label)
+        
+        buffer_group.setLayout(buffer_layout)
+        layout.addWidget(buffer_group)
+        
+        # Memory warnings option
+        from PySide6.QtWidgets import QCheckBox
+        
+        warnings_group = QGroupBox("Memory Warnings")
+        warnings_layout = QVBoxLayout()
+        
+        show_warnings_check = QCheckBox("Show warnings for long-running streams")
+        show_warnings_check.setChecked(AppConfig.get_show_memory_warnings())
+        warnings_layout.addWidget(show_warnings_check)
+        
+        warnings_info = QLabel(
+            "<small>If enabled, you'll be notified every 30 minutes when streaming "
+            "logs for extended periods.</small>"
+        )
+        warnings_info.setWordWrap(True)
+        warnings_layout.addWidget(warnings_info)
+        
+        warnings_group.setLayout(warnings_layout)
+        layout.addWidget(warnings_group)
+        
+        # Buttons
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | 
+            QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        
+        dialog.setLayout(layout)
+        
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            # Save settings
+            if unlimited_radio.isChecked():
+                new_limit = 0
+            else:
+                new_limit = limit_spin.value()
+            
+            AppConfig.set_log_buffer_limit(new_limit)
+            AppConfig.set_show_memory_warnings(show_warnings_check.isChecked())
+            
+            # Apply buffer limit to current log output
+            if new_limit > 0:
+                self.log_output.document().setMaximumBlockCount(new_limit)
+            else:
+                self.log_output.document().setMaximumBlockCount(0)  # unlimited
+            
+            QMessageBox.information(
+                self,
+                "Settings Saved",
+                "Advanced settings have been saved successfully."
+            )
+    
+    def _show_user_guide_dialog(self):
+        """Show comprehensive user guide with all features."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("User Guide - How to Use Argo Log Viewer")
+        dialog.setMinimumSize(800, 600)
+        
+        layout = QVBoxLayout()
+        
+        # Create text browser for scrollable content
+        from PySide6.QtWidgets import QTextBrowser
+        guide = QTextBrowser()
+        guide.setOpenExternalLinks(True)
+        
+        # Get theme-aware HTML styles from themes.py
+        theme_class = get_theme(self.current_theme)
+        html_styles = theme_class.get_user_guide_html_style()
+        
+        # Build HTML with theme-aware styling
+        guide.setHtml(f"""
+        <html>
+        <head>
+            {html_styles}
+        </head>
+        <body>
+            <h1>📖 Argo Log Viewer - Complete User Guide</h1>
+            
+            <h2>🚀 Getting Started</h2>
+            <div class="feature">
+                <h3>1. Connection Setup</h3>
+                <div class="step">
+                    <b>Step 1:</b> Click <b>"Connect"</b> button<br>
+                    <b>Step 2:</b> Wait for SSH connection to establish<br>
+                    <b>Step 3:</b> Console will show "Connected successfully"<br>
+                    <b>Status:</b> Green dot indicates connected
+                </div>
+                <div class="tip">
+                    <b>💡 Tip:</b> Make sure your SSH config is set up properly. 
+                    See <b>Help > SSH Configuration Guide</b> for details.
+                </div>
+            </div>
+            
+            <div class="feature">
+                <h3>2. Viewing Pod Logs</h3>
+                <div class="step">
+                    <b>Step 1:</b> Click <b>"Refresh Pods"</b> to load pods<br>
+                    <b>Step 2:</b> Use search box to filter pods by name<br>
+                    <b>Step 3:</b> Double-click a pod to view its logs<br>
+                    <b>Result:</b> Logs stream in real-time
+                </div>
+            </div>
+            
+            <h2>🎯 Core Features</h2>
+            
+            <div class="feature">
+                <h3>📊 Real-Time Resource Monitoring</h3>
+                <p><b>What it shows:</b> CPU and Memory usage for the selected pod</p>
+                <p><b>Where:</b> Next to pod name in log header</p>
+                <p><b>Update frequency:</b> Every 10 seconds</p>
+                <p><b>Retry:</b> Click 🔄 button to manually refresh metrics</p>
+                <div class="tip">
+                    <b>Note:</b> New pods need ~60 seconds before metrics are available.
+                    If metrics show "Not available", wait a moment and click retry.
+                </div>
+            </div>
+            
+            <div class="feature">
+                <h3>🔍 Log Search</h3>
+                <p><b>Open search:</b> Press <code>Ctrl+F</code> (Windows/Linux) or <code>Cmd+F</code> (Mac)</p>
+                <p><b>Enter search term:</b> Type in search box</p>
+                <p><b>Navigate:</b> Use ↑↓ buttons or press <code>Enter</code> for next match</p>
+                <p><b>Case-sensitive:</b> Check the "Match Case" option</p>
+                <p><b>Close:</b> Press <code>Esc</code> or click X</p>
+                <div class="tip">
+                    <b>💡 Tip:</b> Search works on all logs, even while streaming.
+                    Results update as new logs arrive (when scrolled up).
+                </div>
+            </div>
+            
+            <div class="feature">
+                <h3>💾 Saving Logs</h3>
+                <p><b>When:</b> Available when viewing logs</p>
+                <p><b>How:</b> Click <b>"Save Logs"</b> button</p>
+                <p><b>Choose location:</b> Select where to save the .txt file</p>
+                <p><b>What's saved:</b> All logs currently visible (complete history)</p>
+                <div class="tip">
+                    <b>💡 Tip:</b> Logs are saved with secure permissions (600).
+                    You can save even after stopping the stream.
+                </div>
+            </div>
+            
+            <div class="feature">
+                <h3>⛶ Fullscreen Mode</h3>
+                <p><b>Enter:</b> Click <b>"Fullscreen"</b> button</p>
+                <p><b>Features:</b> Logs-only view with search and metrics</p>
+                <p><b>Exit:</b> Press <code>Esc</code> or click <b>"Exit Fullscreen"</b></p>
+                <div class="tip">
+                    <b>💡 Tip:</b> Perfect for presentations or focused debugging!
+                </div>
+            </div>
+            
+            <div class="feature">
+                <h3>⏹️ Stop Logs</h3>
+                <p><b>What it does:</b> Stops live streaming</p>
+                <p><b>What it keeps:</b> All existing logs remain visible</p>
+                <p><b>What it hides:</b> Metrics and retry button</p>
+                <p><b>Still available:</b> Save, Search, Fullscreen</p>
+                <div class="tip">
+                    <b>💡 Use case:</b> Stop streaming to save current logs, then select another pod.
+                </div>
+            </div>
+            
+            <h2>🎨 Customization</h2>
+            
+            <div class="feature">
+                <h3>Theme Selection</h3>
+                <p><b>Options:</b> Dark Mode (default), Light Mode, High Contrast</p>
+                <p><b>Where:</b> Theme selector at top-right</p>
+                <p><b>Effect:</b> Changes all UI colors instantly</p>
+            </div>
+            
+            <div class="feature">
+                <h3>Custom SSH Folder</h3>
+                <p><b>Where:</b> Settings > Custom SSH Folder</p>
+                <p><b>Use case:</b> Use non-default SSH config location</p>
+                <p><b>Example:</b> Work SSH config vs Personal SSH config</p>
+            </div>
+            
+            <div class="feature">
+                <h3>Advanced Settings</h3>
+                <p><b>Where:</b> Settings > Advanced Settings</p>
+                <p><b>Options:</b></p>
+                <ul>
+                    <li><b>Log Buffer:</b> Unlimited (default) or Limited for 24hr+ streams</li>
+                    <li><b>Memory Warnings:</b> Get notified for long-running streams</li>
+                </ul>
+                <div class="tip">
+                    <b>💡 Recommendation:</b> Keep "Unlimited" for complete log saving.
+                    Use "Limited" only if you run into memory issues with very long streams.
+                </div>
+            </div>
+            
+            <h2>🔧 Keyboard Shortcuts</h2>
+            <div class="feature">
+                <table>
+                    <tr>
+                        <th>Action</th>
+                        <th>Windows/Linux</th>
+                        <th>macOS</th>
+                    </tr>
+                    <tr>
+                        <td>Open Search</td>
+                        <td><code>Ctrl+F</code></td>
+                        <td><code>Cmd+F</code></td>
+                    </tr>
+                    <tr>
+                        <td>Next Search Result</td>
+                        <td><code>Enter</code> or <code>F3</code></td>
+                        <td><code>Enter</code> or <code>Cmd+G</code></td>
+                    </tr>
+                    <tr>
+                        <td>Previous Search Result</td>
+                        <td><code>Shift+F3</code></td>
+                        <td><code>Shift+Cmd+G</code></td>
+                    </tr>
+                    <tr>
+                        <td>Close Search</td>
+                        <td><code>Esc</code></td>
+                        <td><code>Esc</code></td>
+                    </tr>
+                    <tr>
+                        <td>Exit Fullscreen</td>
+                        <td><code>Esc</code></td>
+                        <td><code>Esc</code></td>
+                    </tr>
+                </table>
+            </div>
+            
+            <h2>⚠️ Troubleshooting</h2>
+            
+            <div class="feature">
+                <h3>Connection Issues</h3>
+                <p><b>Problem:</b> Can't connect to server</p>
+                <p><b>Solutions:</b></p>
+                <ul>
+                    <li>Check SSH config file exists (~/.ssh/config)</li>
+                    <li>Verify jump host and internal host are correct</li>
+                    <li>Test SSH connection manually in terminal</li>
+                    <li>See <b>Help > SSH Configuration Guide</b></li>
+                </ul>
+            </div>
+            
+            <div class="feature">
+                <h3>Metrics Not Available</h3>
+                <p><b>Possible causes:</b></p>
+                <ul>
+                    <li><b>Pod too new:</b> Wait 60 seconds and click retry 🔄</li>
+                    <li><b>Metrics server not installed:</b> Contact cluster admin</li>
+                    <li><b>Pod not running:</b> Check pod status</li>
+                </ul>
+            </div>
+            
+            <div class="feature">
+                <h3>Logs Slow/Lagging</h3>
+                <p><b>Solutions:</b></p>
+                <ul>
+                    <li>Disable search while streaming (close search bar)</li>
+                    <li>Set log buffer limit (Settings > Advanced)</li>
+                    <li>Save logs and restart stream</li>
+                </ul>
+            </div>
+            
+            <div class="feature">
+                <h3>Memory Warnings</h3>
+                <p><b>Cause:</b> Stream running for 30+ minutes with 10k+ lines</p>
+                <p><b>Options:</b></p>
+                <ul>
+                    <li>Save logs and continue (recommended)</li>
+                    <li>Set buffer limit for auto-cleanup</li>
+                    <li>Disable warnings (Settings > Advanced)</li>
+                </ul>
+            </div>
+            
+            <h2>🔄 Updates</h2>
+            <div class="feature">
+                <h3>Automatic Update Checks</h3>
+                <p><b>When:</b> Every time app opens</p>
+                <p><b>Notification:</b> Yellow banner if update available</p>
+                <p><b>Manual check:</b> Settings > Check for Updates</p>
+                <p><b>Installation:</b></p>
+                <ul>
+                    <li><b>Windows:</b> Auto-downloads and launches installer</li>
+                    <li><b>macOS:</b> Manual install instructions provided</li>
+                    <li><b>Linux:</b> Manual install instructions provided</li>
+                </ul>
+                <div class="warning">
+                    <b>⚠️ Your data is safe:</b> Updates never delete your configuration or settings!
+                </div>
+            </div>
+            
+            <h2>📚 Additional Resources</h2>
+            <ul>
+                <li><b>GitHub:</b> <a href="https://github.com/harshmeet-1029/Arog-Log-veiwer">github.com/harshmeet-1029/Arog-Log-veiwer</a></li>
+                <li><b>Keyboard Shortcuts:</b> Help > Keyboard Shortcuts</li>
+                <li><b>SSH Setup:</b> Help > SSH Configuration Guide</li>
+            </ul>
+            
+            <h2>💡 Tips & Best Practices</h2>
+            <div class="feature">
+                <ol>
+                    <li><b>Search Efficiently:</b> Close search when not needed for better performance</li>
+                    <li><b>Save Regularly:</b> Save important logs before switching pods</li>
+                    <li><b>Use Fullscreen:</b> Perfect for demos and debugging sessions</li>
+                    <li><b>Monitor Resources:</b> Watch CPU/Memory to spot issues early</li>
+                    <li><b>Update Regularly:</b> New features and fixes arrive frequently</li>
+                </ol>
+            </div>
+            
+            <div style="margin-top: 40px; padding: 20px; border: 2px solid #27ae60; border-radius: 5px;">
+                <h3>🎉 You're all set!</h3>
+                <p>If you have questions or need help, check the other Help menu options or visit the GitHub repository.</p>
+                <p><b>Happy log viewing!</b> 🚀</p>
+            </div>
+        </body>
+        </html>
+        """)
+        
+        layout.addWidget(guide)
+        
+        # Close button
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(dialog.accept)
+        layout.addWidget(close_btn)
+        
+        dialog.setLayout(layout)
+        dialog.exec()
     
     # -------------------------
     # Window Close Event

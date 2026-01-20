@@ -65,8 +65,8 @@ secrets.yml
 secrets.yaml
 config.local.py
 
-# Private documentation
-NOTES.md
+# Private documentation and internal notes
+MD/
 
 # Test
 .pytest_cache/
