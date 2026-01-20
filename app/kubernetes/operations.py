@@ -288,10 +288,24 @@ class KubernetesOperations:
             
             logger.debug(f"Raw metrics output: {repr(clean_output[:200])}")
             
-            # Check for errors
-            if not clean_output or "error" in clean_output.lower() or "not available" in clean_output.lower():
-                logger.warning(f"Metrics not available: {clean_output[:100]}")
-                raise RuntimeError("Metrics server not available")
+            # Check for specific error messages from kubectl top
+            if "error" in clean_output.lower():
+                # Check if it's a "pod not found" vs "metrics not available" error
+                if "not found" in clean_output.lower():
+                    logger.warning(f"Pod not found: {safe_pod_name_log}")
+                    raise RuntimeError("Pod not found")
+                elif "metrics not available" in clean_output.lower() or "not yet available" in clean_output.lower():
+                    # Pod exists but metrics aren't ready yet (too new or recently restarted)
+                    logger.debug(f"Metrics not yet available for pod (likely too new): {safe_pod_name_log}")
+                    raise RuntimeError("Pod too new - metrics not ready (wait 15-60s)")
+                else:
+                    logger.warning(f"Metrics error: {clean_output[:100]}")
+                    raise RuntimeError("Metrics server not available")
+            
+            if not clean_output:
+                # Empty response - could be metrics-server issue or pod too new
+                logger.debug(f"Empty metrics response for pod: {safe_pod_name_log}")
+                raise RuntimeError("Metrics not available yet - pod may be too new")
             
             # Remove command echoes if present
             lines = clean_output.split('\n')
@@ -304,6 +318,10 @@ class KubernetesOperations:
             
             clean_output = '\n'.join(result_lines)
             logger.debug(f"Cleaned metrics output: {repr(clean_output)}")
+            
+            # Final validation - should have some data
+            if not clean_output or len(clean_output) < 5:
+                raise RuntimeError("Pod too new - metrics collecting (wait ~30s)")
             
             return clean_output
         
@@ -318,6 +336,11 @@ class KubernetesOperations:
             
             if "timeout" in safe_error.lower() or "Timeout" in str(e):
                 raise RuntimeError("Metrics request timed out")
+            
+            # Pass through our specific error messages
+            if "Pod too new" in str(e) or "not ready" in str(e).lower() or "not yet available" in str(e).lower():
+                raise  # Re-raise with original message
+            
             raise RuntimeError(f"Metrics unavailable: {e}")
     
     # -------------------------

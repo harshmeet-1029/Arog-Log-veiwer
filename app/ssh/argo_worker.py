@@ -314,7 +314,7 @@ class ArgoWorker(QThread):
             # Get metrics in a loop until stopped (silent operation)
             import time
             failed_attempts = 0
-            max_failed_attempts = 2  # Reduced from 3 to fail faster
+            max_failed_attempts = 7  # Allow 7 retries before giving up
             
             while not self._should_stop:
                 try:
@@ -338,22 +338,52 @@ class ArgoWorker(QThread):
                     failed_attempts += 1
                     logger.warning(f"Metrics fetch failed (attempt {failed_attempts}/{max_failed_attempts}): {error_msg}")
                     
-                    # Check if metrics-server is not available or too many failures
-                    if failed_attempts >= max_failed_attempts or \
-                       "Metrics server not available" in error_msg or \
-                       "Metrics API not available" in error_msg or \
-                       "metrics.k8s.io" in error_msg or \
-                       "timed out" in error_msg.lower():
-                        
-                        if "timed out" in error_msg.lower():
-                            self.error.emit("Metrics unavailable - command timed out")
-                        else:
-                            self.error.emit("Metrics server not available in cluster")
+                    # Check if metrics-server is definitely not available (hard errors)
+                    is_hard_error = (
+                        "Metrics server not available" in error_msg or
+                        "Metrics API not available" in error_msg or
+                        "metrics.k8s.io" in error_msg
+                    )
+                    
+                    # Check if pod is too new (soft error - should retry)
+                    is_pod_too_new = (
+                        "Pod too new" in error_msg or
+                        "not ready" in error_msg.lower() or
+                        "not yet available" in error_msg.lower() or
+                        "metrics collecting" in error_msg.lower()
+                    )
+                    
+                    # If hard error, give up immediately
+                    if is_hard_error:
+                        self.error.emit("Metrics server not installed in cluster")
                         break
-                    else:
-                        # Temporary error - wait briefly and retry
-                        logger.debug("Retrying metrics fetch after brief delay...")
-                        time.sleep(2)
+                    
+                    # If pod too new, show helpful message and retry
+                    if is_pod_too_new:
+                        if failed_attempts < max_failed_attempts:
+                            # Still retrying - show wait message
+                            self.metrics.emit("⏳ Pod too new, waiting for metrics... (~30s)")
+                            retry_delay = 3  # Fixed 3s delay for new pods
+                            logger.debug(f"Pod too new, retrying in {retry_delay}s (attempt {failed_attempts}/{max_failed_attempts})...")
+                            time.sleep(retry_delay)
+                            continue
+                        else:
+                            # Max retries reached
+                            self.error.emit("Pod is too new - metrics need ~60s to become available")
+                            break
+                    
+                    # If max attempts reached for other errors, give up
+                    if failed_attempts >= max_failed_attempts:
+                        if "timed out" in error_msg.lower():
+                            self.error.emit("Metrics unavailable - command timed out after 7 retries")
+                        else:
+                            self.error.emit(f"Metrics unavailable after {max_failed_attempts} attempts")
+                        break
+                    
+                    # Temporary error - wait and retry
+                    retry_delay = min(2 * failed_attempts, 5)  # Progressive delay: 2s, 4s, 5s, 5s...
+                    logger.debug(f"Retrying metrics fetch in {retry_delay}s (attempt {failed_attempts}/{max_failed_attempts})...")
+                    time.sleep(retry_delay)
             
             logger.info("Metrics monitoring stopped (logs unaffected)")
         

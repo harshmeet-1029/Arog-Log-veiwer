@@ -753,6 +753,15 @@ class MainWindow(QWidget):
         self.metrics_label.setVisible(False)
         header_layout.addWidget(self.metrics_label)
         
+        # Retry button for metrics (compact, next to metrics)
+        self.retry_metrics_btn = QPushButton("🔄")
+        self.retry_metrics_btn.setToolTip("Retry fetching metrics")
+        self.retry_metrics_btn.setMaximumWidth(35)
+        self.retry_metrics_btn.setMaximumHeight(25)
+        self.retry_metrics_btn.setVisible(False)
+        self.retry_metrics_btn.clicked.connect(self.retry_metrics)
+        header_layout.addWidget(self.retry_metrics_btn)
+        
         header_layout.addStretch()
         
         # Fullscreen button
@@ -867,6 +876,7 @@ class MainWindow(QWidget):
         self.save_logs_btn.setVisible(False)
         self.metrics_label.setVisible(False)
         self.metrics_label.clear()
+        self.retry_metrics_btn.setVisible(False)
         self.status_label.setText("● Disconnected")
         self.status_label.setStyleSheet("color: red; font-weight: bold; font-size: 11pt;")
     
@@ -891,6 +901,7 @@ class MainWindow(QWidget):
         self.log_output.clear()
         self.metrics_label.clear()
         self.metrics_label.setVisible(False)
+        self.retry_metrics_btn.setVisible(False)
         self.current_pod_for_metrics = None
         self.current_pod_label.setText("No pod selected")
     
@@ -1057,9 +1068,10 @@ class MainWindow(QWidget):
         self.fullscreen_btn.setVisible(True)
         self.save_logs_btn.setVisible(True)
         
-        # Show metrics label and start auto-monitoring
+        # Show metrics label and retry button, start auto-monitoring
         self.metrics_label.setVisible(True)
         self.metrics_label.setText("📊 Loading metrics...")
+        self.retry_metrics_btn.setVisible(True)
         
         logger.info("Starting logs worker")
         self.worker.start()
@@ -1076,18 +1088,39 @@ class MainWindow(QWidget):
             self.metrics_label.setText("⚠️ Metrics unavailable")
     
     def stop_log_stream(self):
-        """Stop the current log stream."""
+        """Stop the current log stream and unselect the pod."""
         if self.worker and self.worker.isRunning():
-            logger.info("Stopping log stream")
+            logger.info("Stopping log stream and unselecting pod")
             self.console_output.append("\n[INFO] Stopping log stream...\n")
             self.worker.stop()
             self.worker.wait(2000)  # Wait up to 2 seconds
-            self.stop_logs_btn.setEnabled(False)
-            self.current_pod_label.setText("Log stream stopped")
             
-            # Update fullscreen label if in fullscreen mode
-            if self.is_fullscreen and hasattr(self, 'fullscreen_pod_label'):
-                self.fullscreen_pod_label.setText("Log stream stopped")
+        # Stop metrics monitoring
+        self.stop_metrics_monitoring()
+        
+        # Disable and hide all pod-related UI elements
+        self.stop_logs_btn.setEnabled(False)
+        self.current_pod_label.setText("No pod selected")
+        self.current_pod_for_metrics = None
+        
+        # Hide metrics and retry button
+        self.metrics_label.setVisible(False)
+        self.metrics_label.clear()
+        self.retry_metrics_btn.setVisible(False)
+        
+        # Hide fullscreen and save buttons
+        self.fullscreen_btn.setVisible(False)
+        self.save_logs_btn.setVisible(False)
+        
+        # Unselect pod in list
+        self.pod_list.clearSelection()
+        
+        # Clear log output
+        self.log_output.clear()
+        
+        # Update fullscreen label if in fullscreen mode
+        if self.is_fullscreen and hasattr(self, 'fullscreen_pod_label'):
+            self.fullscreen_pod_label.setText("No pod selected")
     
     def start_metrics_monitoring(self):
         """Start monitoring CPU and memory for the current pod viewing logs.
@@ -1140,6 +1173,23 @@ class MainWindow(QWidget):
             self.metrics_worker.stop()
             self.metrics_worker.wait(2000)  # Wait up to 2 seconds
             self.is_monitoring_metrics = False
+    
+    def retry_metrics(self):
+        """Manually retry fetching metrics for the current pod."""
+        if not self.current_pod_for_metrics:
+            logger.warning("No pod selected for metrics retry")
+            QMessageBox.warning(self, "No Pod Selected", "Please select a pod first to view metrics.")
+            return
+        
+        logger.info(f"Manual metrics retry requested for pod: {self.current_pod_for_metrics}")
+        self.metrics_label.setText("│ 🔄 Retrying...")
+        
+        # Stop existing metrics monitoring and restart
+        self.stop_metrics_monitoring()
+        
+        # Restart metrics monitoring
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(500, self.start_metrics_monitoring)  # Quick retry
     
     def _update_metrics_display(self, metrics_text: str):
         """Update the metrics display with new data - compact single line format."""
@@ -1554,9 +1604,9 @@ class MainWindow(QWidget):
     
     def _append_log(self, text):
         """Append text to log output and update search results if active."""
-        # Store current cursor position to maintain it
-        cursor = self.log_output.textCursor()
-        was_at_end = cursor.position() >= self.log_output.document().characterCount() - 10
+        # Smart scroll: Check if user is actually at the bottom using scrollbar position
+        scrollbar = self.log_output.verticalScrollBar()
+        was_at_bottom = scrollbar.value() >= scrollbar.maximum() - 10  # Allow small margin
         
         # Append the new text
         self.log_output.moveCursor(QTextCursor.MoveOperation.End)
@@ -1579,9 +1629,10 @@ class MainWindow(QWidget):
             if new_count > old_count:
                 logger.debug(f"Search results updated: {old_count} -> {new_count} occurrences")
         else:
-            # No active search, just move to end if we were there
-            if was_at_end:
+            # No active search - ONLY auto-scroll if user was already at the bottom
+            if was_at_bottom:
                 self.log_output.moveCursor(QTextCursor.MoveOperation.End)
+                scrollbar.setValue(scrollbar.maximum())  # Ensure we're at the very bottom
     
     # -------------------------
     # Theme Management
