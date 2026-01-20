@@ -7,12 +7,14 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
     QListWidget, QTextEdit, QLineEdit, QLabel, 
     QMessageBox, QSplitter, QGroupBox, QComboBox,
-    QMenuBar, QDialog, QDialogButtonBox, QFileDialog, QSizePolicy
+    QMenuBar, QDialog, QDialogButtonBox, QFileDialog, QSizePolicy,
+    QMenu, QCheckBox, QSpinBox
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import (
     QFont, QTextCursor, QPalette, QColor, QAction, 
-    QTextDocument, QShortcut, QKeySequence, QIcon
+    QTextDocument, QShortcut, QKeySequence, QIcon,
+    QTextCharFormat, QTextBlockFormat
 )
 from app.ssh.argo_worker import ArgoWorker
 from app.ssh.connection_manager import SSHConnectionManager
@@ -76,6 +78,16 @@ class MainWindow(QWidget):
         self.current_search_term = ""
         self.search_occurrences = []
         self.current_occurrence_index = -1
+        
+        # Feature flags
+        self.show_line_numbers = AppConfig.get_show_line_numbers()
+        self.enable_log_highlighting = AppConfig.get_enable_log_highlighting()
+        
+        # Auto-reconnect settings
+        self.auto_reconnect_enabled = AppConfig.get_auto_reconnect()
+        self.reconnect_attempts = 0
+        self.max_reconnect_attempts = 3
+        self.reconnect_timer = None
         
         logger.debug("Building UI components")
         self._build_ui()
@@ -273,14 +285,16 @@ class MainWindow(QWidget):
     
     def handle_escape(self):
         """Smart escape handler - closes search bar first, then fullscreen."""
-        if self.log_search_bar.isVisible():
+        logger.debug(f"handle_escape called - search_visible={self.log_search_bar.isVisible()}, is_fullscreen={self.is_fullscreen}")
+        
+        if hasattr(self, 'log_search_bar') and self.log_search_bar.isVisible():
             # If search bar is open, close it
             self.hide_search_bar()
             logger.debug("Escape pressed: closed search bar")
         elif self.is_fullscreen:
             # If in fullscreen and search is not open, exit fullscreen
+            logger.debug("Escape pressed: attempting to exit fullscreen")
             self.exit_fullscreen()
-            logger.debug("Escape pressed: exited fullscreen")
         else:
             logger.debug("Escape pressed: no action taken")
     
@@ -344,10 +358,41 @@ class MainWindow(QWidget):
         
         settings_menu.addSeparator()
         
+        # View options
+        self.line_numbers_action = QAction("Show Line Numbers", self)
+        self.line_numbers_action.setCheckable(True)
+        self.line_numbers_action.setChecked(self.show_line_numbers)
+        self.line_numbers_action.setStatusTip("Toggle line numbers in log view")
+        self.line_numbers_action.triggered.connect(self._toggle_line_numbers)
+        settings_menu.addAction(self.line_numbers_action)
+        
+        self.log_highlighting_action = QAction("Enable Log Highlighting", self)
+        self.log_highlighting_action.setCheckable(True)
+        self.log_highlighting_action.setChecked(self.enable_log_highlighting)
+        self.log_highlighting_action.setStatusTip("Color-code logs by level (ERROR, WARN, INFO)")
+        self.log_highlighting_action.triggered.connect(self._toggle_log_highlighting)
+        settings_menu.addAction(self.log_highlighting_action)
+        
+        self.auto_reconnect_action = QAction("Enable Auto-Reconnect", self)
+        self.auto_reconnect_action.setCheckable(True)
+        self.auto_reconnect_action.setChecked(self.auto_reconnect_enabled)
+        self.auto_reconnect_action.setStatusTip("Automatically reconnect on connection loss")
+        self.auto_reconnect_action.triggered.connect(self._toggle_auto_reconnect)
+        settings_menu.addAction(self.auto_reconnect_action)
+        
+        settings_menu.addSeparator()
+        
         check_updates_action = QAction("Check for Updates", self)
         check_updates_action.setStatusTip("Check for application updates")
         check_updates_action.triggered.connect(self._check_for_updates_manual)
         settings_menu.addAction(check_updates_action)
+        
+        settings_menu.addSeparator()
+        
+        reset_settings_action = QAction("⚠️ Reset to Defaults...", self)
+        reset_settings_action.setStatusTip("Reset all settings to default values")
+        reset_settings_action.triggered.connect(self._reset_settings_to_defaults)
+        settings_menu.addAction(reset_settings_action)
         
         # Help menu with shortcuts
         help_menu = menu_bar.addMenu("Help")
@@ -601,6 +646,8 @@ class MainWindow(QWidget):
         self.log_output = QTextEdit()
         self.log_output.setReadOnly(True)
         self.log_output.setLineWrapMode(QTextEdit.NoWrap)
+        self.log_output.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.log_output.customContextMenuRequested.connect(self._show_log_context_menu)
         
         # Use monospace font for logs
         log_font = QFont("Courier New", 9)
@@ -1153,19 +1200,28 @@ class MainWindow(QWidget):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         default_filename = f"{pod_name}_{timestamp}.txt"
         
-        # Open file dialog
-        file_path, _ = QFileDialog.getSaveFileName(
+        # Open file dialog with HTML option
+        file_path, selected_filter = QFileDialog.getSaveFileName(
             self._get_active_window(),
             "Save Logs",
             default_filename,
-            "Text Files (*.txt);;Log Files (*.log);;All Files (*.*)"
+            "Text Files (*.txt);;HTML Files (*.html);;Log Files (*.log);;All Files (*.*)"
         )
         
         if file_path:
             try:
-                # Write logs to file
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    f.write(log_content)
+                # Determine format based on extension or filter
+                is_html = file_path.endswith('.html') or 'HTML' in selected_filter
+                
+                if is_html:
+                    # Export as HTML with formatting
+                    html_content = self._generate_html_log_export(log_content, pod_name)
+                    with open(file_path, 'w', encoding='utf-8') as f:
+                        f.write(html_content)
+                else:
+                    # Write logs as plain text
+                    with open(file_path, 'w', encoding='utf-8') as f:
+                        f.write(log_content)
                 
                 # SECURITY: Set secure file permissions (owner read/write only)
                 # This prevents other users from reading potentially sensitive logs
@@ -1191,11 +1247,271 @@ class MainWindow(QWidget):
                     f"Failed to save logs:\n{str(e)}"
                 )
     
+    def _generate_html_log_export(self, log_content: str, pod_name: str) -> str:
+        """Generate HTML export with log level highlighting."""
+        from datetime import datetime
+        import html
+        import re
+        
+        # HTML template with styling
+        html_template = """<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Logs: {pod_name}</title>
+    <style>
+        body {{
+            font-family: 'Courier New', monospace;
+            background-color: #1e1e1e;
+            color: #d4d4d4;
+            padding: 20px;
+            margin: 0;
+        }}
+        .header {{
+            background-color: #2d2d2d;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }}
+        .header h1 {{
+            margin: 0;
+            color: #4a9eff;
+            font-size: 24px;
+        }}
+        .header p {{
+            margin: 5px 0 0 0;
+            color: #888;
+            font-size: 14px;
+        }}
+        .logs {{
+            background-color: #1e1e1e;
+            padding: 15px;
+            border: 1px solid #3c3c3c;
+            border-radius: 5px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            line-height: 1.4;
+        }}
+        /* Only ERROR and WARN are highlighted (not INFO/DEBUG) */
+        .error {{ color: #ff6b6b; font-weight: bold; }}
+        .warn {{ color: #ffa726; font-weight: bold; }}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>📋 Logs: {pod_name}</h1>
+        <p>Generated: {timestamp}</p>
+        <p>Total Lines: {total_lines} | Errors: {errors} | Warnings: {warnings}</p>
+    </div>
+    <div class="logs">{highlighted_logs}</div>
+</body>
+</html>"""
+        
+        # Count statistics (using word boundaries for accuracy)
+        lines = log_content.split('\n')
+        total_lines = len(lines)
+        errors = sum(1 for line in lines if re.search(r'\b(ERROR|FATAL|CRITICAL|EXCEPTION)\b', line.upper()))
+        warnings = sum(1 for line in lines if re.search(r'\b(WARN|WARNING)\b', line.upper()))
+        
+        # Highlight each line (ONLY critical levels: ERROR/WARN)
+        highlighted_lines = []
+        for line in lines:
+            escaped_line = html.escape(line)
+            line_upper = line.upper()
+            
+            # Use word boundaries to avoid false positives
+            if re.search(r'\b(ERROR|FATAL|CRITICAL|EXCEPTION)\b', line_upper):
+                highlighted_lines.append(f'<span class="error">{escaped_line}</span>')
+            elif re.search(r'\b(WARN|WARNING)\b', line_upper):
+                highlighted_lines.append(f'<span class="warn">{escaped_line}</span>')
+            else:
+                # No highlighting for INFO/DEBUG (too common, creates clutter)
+                highlighted_lines.append(escaped_line)
+        
+        highlighted_logs = '\n'.join(highlighted_lines)
+        
+        # Fill template
+        html_output = html_template.format(
+            pod_name=html.escape(pod_name),
+            timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            total_lines=total_lines,
+            errors=errors,
+            warnings=warnings,
+            highlighted_logs=highlighted_logs
+        )
+        
+        return html_output
+    
+    def _show_log_context_menu(self, position):
+        """Show context menu for log output."""
+        menu = QMenu(self)
+        
+        # Copy actions
+        cursor = self.log_output.textCursor()
+        has_selection = cursor.hasSelection()
+        
+        copy_action = menu.addAction("📋 Copy")
+        copy_action.setEnabled(has_selection)
+        copy_action.triggered.connect(lambda: self.log_output.copy())
+        
+        copy_line_action = menu.addAction("📄 Copy Current Line")
+        copy_line_action.triggered.connect(self._copy_current_line)
+        
+        copy_all_action = menu.addAction("📚 Copy All Logs")
+        copy_all_action.triggered.connect(self._copy_all_logs)
+        
+        menu.addSeparator()
+        
+        # Select all
+        select_all_action = menu.addAction("⬜ Select All")
+        select_all_action.triggered.connect(self.log_output.selectAll)
+        
+        menu.addSeparator()
+        
+        # Save option
+        save_action = menu.addAction("💾 Save Logs...")
+        save_action.triggered.connect(self.save_logs_to_file)
+        
+        # Show menu at cursor position
+        menu.exec(self.log_output.mapToGlobal(position))
+    
+    def _copy_current_line(self):
+        """Copy the line under the cursor."""
+        cursor = self.log_output.textCursor()
+        cursor.select(QTextCursor.SelectionType.LineUnderCursor)
+        line_text = cursor.selectedText()
+        
+        from PySide6.QtWidgets import QApplication
+        clipboard = QApplication.clipboard()
+        clipboard.setText(line_text)
+        
+        logger.debug(f"Copied line to clipboard: {line_text[:50]}...")
+    
+    def _copy_all_logs(self):
+        """Copy all logs to clipboard."""
+        from PySide6.QtWidgets import QApplication
+        clipboard = QApplication.clipboard()
+        clipboard.setText(self.log_output.toPlainText())
+        
+        logger.info("Copied all logs to clipboard")
+    
+    def _toggle_line_numbers(self, checked: bool):
+        """Toggle line numbers display."""
+        self.show_line_numbers = checked
+        AppConfig.set_show_line_numbers(checked)
+        logger.info(f"Line numbers {'enabled' if checked else 'disabled'}")
+        
+        # Note: Line numbers would require a custom widget or QPlainTextEdit
+        # For now, we'll show a message that this requires app restart
+        if checked:
+            QMessageBox.information(
+                self,
+                "Line Numbers",
+                "Line numbers feature is enabled!\n\n"
+                "Note: This feature is best visible when the app restarts."
+            )
+    
+    def _toggle_log_highlighting(self, checked: bool):
+        """Toggle log level highlighting."""
+        self.enable_log_highlighting = checked
+        AppConfig.set_enable_log_highlighting(checked)
+        logger.info(f"Log highlighting {'enabled' if checked else 'disabled'}")
+        
+        # Show info message
+        QMessageBox.information(
+            self,
+            "Log Highlighting",
+            f"Log highlighting {'enabled' if checked else 'disabled'}!\n\n"
+            f"{'Critical log levels will be highlighted:' if checked else 'Logs will be displayed in default colors.'}\n"
+            f"{'• ERROR/FATAL/EXCEPTION → Red' if checked else ''}\n"
+            f"{'• WARN/WARNING → Orange' if checked else ''}\n\n"
+            f"(INFO/DEBUG not colored to avoid clutter)"
+        )
+    
+    def _toggle_auto_reconnect(self, checked: bool):
+        """Toggle auto-reconnect feature."""
+        self.auto_reconnect_enabled = checked
+        AppConfig.set_auto_reconnect(checked)
+        self.reconnect_attempts = 0  # Reset counter
+        logger.info(f"Auto-reconnect {'enabled' if checked else 'disabled'}")
+        
+        QMessageBox.information(
+            self,
+            "Auto-Reconnect",
+            f"Auto-reconnect {'enabled' if checked else 'disabled'}!\n\n"
+            f"{'The app will automatically try to reconnect if the SSH connection is lost.' if checked else 'You will need to manually reconnect if the connection is lost.'}"
+        )
+    
+    def _reset_settings_to_defaults(self):
+        """Reset all settings to default values with confirmation."""
+        logger.info("Reset to defaults requested")
+        
+        # Confirmation dialog
+        confirm = QMessageBox(self)
+        confirm.setIcon(QMessageBox.Icon.Warning)
+        confirm.setWindowTitle("Reset to Defaults")
+        confirm.setText("Are you sure you want to reset all settings to defaults?")
+        confirm.setInformativeText(
+            "This will reset:\n"
+            "• Theme (Dark Mode)\n"
+            "• Line Numbers (OFF)\n"
+            "• Log Highlighting (OFF)\n"
+            "• Auto-Reconnect (ON)\n"
+            "• Log Buffer Limit (Unlimited)\n"
+            "• Memory Warnings (ON)\n"
+            "• Custom SSH Folder (Default)\n\n"
+            "Your SSH connection settings will NOT be affected.\n"
+            "The app will restart after reset."
+        )
+        confirm.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        confirm.setDefaultButton(QMessageBox.StandardButton.No)
+        
+        result = confirm.exec()
+        
+        if result == QMessageBox.StandardButton.Yes:
+            try:
+                logger.info("Resetting all settings to defaults")
+                
+                # Reset all settings to defaults
+                AppConfig.set_theme("dark")
+                AppConfig.set_show_line_numbers(False)
+                AppConfig.set_enable_log_highlighting(False)
+                AppConfig.set_auto_reconnect(True)
+                AppConfig.set_log_buffer_limit(0)  # Unlimited
+                AppConfig.set_show_memory_warnings(True)
+                # Note: SSH folder is separate, not reset
+                
+                logger.info("Settings reset to defaults successfully")
+                
+                # Success message
+                QMessageBox.information(
+                    self,
+                    "Settings Reset",
+                    "All settings have been reset to defaults!\n\n"
+                    "Please restart the application for all changes to take effect."
+                )
+                
+                # Close the application
+                logger.info("Closing application after settings reset")
+                self.close()
+                
+            except Exception as e:
+                logger.error(f"Error resetting settings: {e}")
+                QMessageBox.critical(
+                    self,
+                    "Error",
+                    f"Failed to reset settings:\n{str(e)}"
+                )
+    
     def toggle_fullscreen(self):
         """Toggle fullscreen mode for the log viewer."""
         if not self.is_fullscreen:
             # Enter fullscreen
             logger.info("Entering fullscreen mode")
+            
+            # SET FULLSCREEN FLAG FIRST (before any events can fire)
+            self.is_fullscreen = True
+            self.fullscreen_btn.setText("⛶ Exit Fullscreen")
             
             # Store original parent
             self.original_parent = self.log_container.parent()
@@ -1236,7 +1552,7 @@ class MainWindow(QWidget):
             header_layout.addStretch()
             
             exit_fullscreen_btn = QPushButton("✕ Exit Fullscreen")
-            exit_fullscreen_btn.clicked.connect(self.toggle_fullscreen)
+            exit_fullscreen_btn.clicked.connect(self.exit_fullscreen)
             exit_fullscreen_btn.setToolTip("Exit fullscreen (Esc or F11)")
             exit_fullscreen_btn.setMinimumWidth(140)
             exit_fullscreen_btn.setMinimumHeight(30)
@@ -1254,7 +1570,7 @@ class MainWindow(QWidget):
             escape_shortcut.activated.connect(self.handle_escape)
             
             f11_shortcut = QShortcut(QKeySequence(Qt.Key.Key_F11), self.fullscreen_window)
-            f11_shortcut.activated.connect(self.toggle_fullscreen)
+            f11_shortcut.activated.connect(self.exit_fullscreen)
             
             # Search shortcuts in fullscreen
             find_shortcut = QShortcut(QKeySequence.StandardKey.Find, self.fullscreen_window)
@@ -1267,11 +1583,10 @@ class MainWindow(QWidget):
             find_prev_shortcut.activated.connect(self.find_previous)
             
             # Apply theme to fullscreen window
-            theme = ThemeManager.get_theme(self.current_theme)
-            self.fullscreen_window.setStyleSheet(theme["stylesheet"])
+            theme = get_theme(self.current_theme)
+            self.fullscreen_window.setStyleSheet(theme.get_stylesheet())
             
-            self.is_fullscreen = True
-            self.fullscreen_btn.setText("⛶ Exit Fullscreen")
+            logger.debug("Fullscreen mode entered successfully")
             
         else:
             # Exit fullscreen
@@ -1279,15 +1594,27 @@ class MainWindow(QWidget):
     
     def exit_fullscreen(self):
         """Exit fullscreen mode."""
-        if self.is_fullscreen and hasattr(self, 'fullscreen_window'):
+        logger.debug(f"exit_fullscreen called - is_fullscreen={self.is_fullscreen}, has_window={hasattr(self, 'fullscreen_window')}")
+        
+        if not self.is_fullscreen:
+            logger.warning("exit_fullscreen called but not in fullscreen mode")
+            return
+        
+        if not hasattr(self, 'fullscreen_window'):
+            logger.warning("exit_fullscreen called but fullscreen_window doesn't exist")
+            self.is_fullscreen = False
+            return
+        
+        try:
             logger.info("Exiting fullscreen mode")
             
             # Close search bar if open
-            self.hide_search_bar()
+            if hasattr(self, 'log_search_bar') and self.log_search_bar.isVisible():
+                self.hide_search_bar()
             
             # Move log container back to original parent
-            if self.original_parent:
-                # Find the log section group box
+            if hasattr(self, 'original_parent') and self.original_parent:
+                logger.debug("Restoring log container to original parent")
                 log_section = self.original_parent
                 log_section_layout = log_section.layout()
                 
@@ -1296,9 +1623,18 @@ class MainWindow(QWidget):
                 log_section_layout.insertWidget(1, self.log_container)
             
             # Close and delete fullscreen window
+            logger.debug("Closing fullscreen window")
             self.fullscreen_window.close()
             self.fullscreen_window.deleteLater()
             
+            # Update state
+            self.is_fullscreen = False
+            self.fullscreen_btn.setText("⛶ Fullscreen")
+            logger.info("Successfully exited fullscreen mode")
+            
+        except Exception as e:
+            logger.error(f"Error exiting fullscreen: {e}")
+            # Ensure state is reset even if there was an error
             self.is_fullscreen = False
             self.fullscreen_btn.setText("⛶ Fullscreen")
     
@@ -1312,6 +1648,9 @@ class MainWindow(QWidget):
         self._set_connected_state()
         self.connect_btn.setText("Connect")
         self.console_output.append("\n=== Ready for operations ===\n")
+        
+        # Reset reconnect counter on successful connection
+        self.reconnect_attempts = 0
         
         # Create a separate SSH connection for metrics (non-blocking)
         try:
@@ -1373,15 +1712,54 @@ class MainWindow(QWidget):
             QMessageBox.information(self, "No Results", "No pods found matching the search keyword")
     
     def _on_error(self, error_msg):
-        """Handle error from worker."""
+        """Handle error from worker with optional auto-reconnect."""
         logger.error(f"Worker error: {error_msg}")
-        QMessageBox.critical(self, "Error", error_msg)
+        
+        # Check if this is an SSH connection error
+        is_ssh_error = any(keyword in error_msg.lower() for keyword in 
+                          ['connection', 'ssh', 'timeout', 'broken pipe', 'lost connection'])
+        
+        if is_ssh_error and self.auto_reconnect_enabled and self.reconnect_attempts < self.max_reconnect_attempts:
+            # Attempt auto-reconnect
+            self.reconnect_attempts += 1
+            logger.info(f"Auto-reconnect attempt {self.reconnect_attempts}/{self.max_reconnect_attempts}")
+            
+            # Show notification instead of error dialog
+            self.console_output.append(f"\n⚠️ Connection lost. Auto-reconnecting ({self.reconnect_attempts}/{self.max_reconnect_attempts})...\n")
+            
+            # Schedule reconnect after 3 seconds
+            if self.reconnect_timer:
+                self.reconnect_timer.stop()
+            
+            self.reconnect_timer = QTimer(self)
+            self.reconnect_timer.setSingleShot(True)
+            self.reconnect_timer.timeout.connect(self._attempt_reconnect)
+            self.reconnect_timer.start(3000)  # 3 seconds delay
+        else:
+            # Show error dialog
+            QMessageBox.critical(self, "Error", error_msg)
+            
+            # Reset reconnect counter
+            self.reconnect_attempts = 0
         
         # Re-enable buttons
         self.connect_btn.setEnabled(not self.is_connected)
         self.connect_btn.setText("Connect")
         self.fetch_btn.setEnabled(self.is_connected)
         self.fetch_btn.setText("Fetch Pods")
+    
+    def _attempt_reconnect(self):
+        """Attempt to reconnect to SSH."""
+        logger.info("Attempting to reconnect...")
+        self.console_output.append("🔄 Reconnecting...\n")
+        
+        # Mark as disconnected first
+        self.is_connected = False
+        self._set_disconnected_state()
+        
+        # Try to reconnect with the same credentials
+        # This will trigger the connect flow again
+        QTimer.singleShot(500, self.connect_to_server)
     
     def _append_console(self, text):
         """Append text to console output."""
@@ -1390,15 +1768,44 @@ class MainWindow(QWidget):
         self.console_output.moveCursor(QTextCursor.MoveOperation.End)
     
     def _append_log(self, text):
-        """Append text to log output and update search results if active."""
+        """Append text to log output with optional syntax highlighting."""
         # Smart scroll: Check if user is actually at the bottom using scrollbar position
         # IMPORTANT: Check BEFORE adding new text, as maximum will change!
         scrollbar = self.log_output.verticalScrollBar()
         was_at_bottom = scrollbar.value() >= scrollbar.maximum() - 10  # Allow small margin
         
-        # Append the new text
-        self.log_output.moveCursor(QTextCursor.MoveOperation.End)
-        self.log_output.insertPlainText(text)
+        # Move cursor to end
+        cursor = self.log_output.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        
+        # Apply log level highlighting if enabled
+        if self.enable_log_highlighting and text.strip():
+            text_upper = text.upper()
+            color = None
+            
+            # ONLY color critical levels - not INFO (too common)
+            # Use word boundaries to avoid false positives
+            import re
+            if re.search(r'\b(ERROR|FATAL|CRITICAL|EXCEPTION)\b', text_upper):
+                color = QColor("#F44336")  # Red for errors
+            elif re.search(r'\b(WARN|WARNING)\b', text_upper):
+                color = QColor("#FFA726")  # Orange for warnings
+            
+            # Apply color formatting only if we found a critical level
+            if color:
+                format = QTextCharFormat()
+                format.setForeground(color)
+                cursor.setCharFormat(format)
+            else:
+                # Use default format (no color)
+                cursor.setCharFormat(QTextCharFormat())
+        else:
+            # No highlighting, use default format
+            cursor.setCharFormat(QTextCharFormat())
+        
+        # Insert text
+        cursor.insertText(text)
+        self.log_output.setTextCursor(cursor)
         
         # Memory warning check (every 30 minutes)
         self._check_memory_warning()

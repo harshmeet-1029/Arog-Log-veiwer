@@ -334,6 +334,45 @@ class AppConfig:
         config = AppConfig.load_config()
         config['show_memory_warnings'] = enabled
         AppConfig.save_config(config)
+    
+    @staticmethod
+    def get_show_line_numbers() -> bool:
+        """Get whether to show line numbers in logs."""
+        config = AppConfig.load_config()
+        return config.get('show_line_numbers', False)  # Default: disabled
+    
+    @staticmethod
+    def set_show_line_numbers(enabled: bool) -> None:
+        """Set whether to show line numbers in logs."""
+        config = AppConfig.load_config()
+        config['show_line_numbers'] = enabled
+        AppConfig.save_config(config)
+    
+    @staticmethod
+    def get_enable_log_highlighting() -> bool:
+        """Get whether to enable log level highlighting."""
+        config = AppConfig.load_config()
+        return config.get('enable_log_highlighting', False)  # Default: DISABLED
+    
+    @staticmethod
+    def set_enable_log_highlighting(enabled: bool) -> None:
+        """Set whether to enable log level highlighting."""
+        config = AppConfig.load_config()
+        config['enable_log_highlighting'] = enabled
+        AppConfig.save_config(config)
+    
+    @staticmethod
+    def get_auto_reconnect() -> bool:
+        """Get whether auto-reconnect is enabled."""
+        config = AppConfig.load_config()
+        return config.get('auto_reconnect', True)  # Default: enabled
+    
+    @staticmethod
+    def set_auto_reconnect(enabled: bool) -> None:
+        """Set whether auto-reconnect is enabled."""
+        config = AppConfig.load_config()
+        config['auto_reconnect'] = enabled
+        AppConfig.save_config(config)
 
 
 class UpdateConfig:
