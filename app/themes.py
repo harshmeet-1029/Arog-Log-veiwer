@@ -6,6 +6,68 @@ Easy to add new themes - just copy a theme class and modify colors!
 
 Created by: Harshmeet Singh (2024-2026)
 """
+from pathlib import Path
+import tempfile
+
+
+# Generate checkbox icons
+def _get_checkbox_icon_path():
+    """Get path to checkmark icon, create if doesn't exist."""
+    icon_dir = Path(tempfile.gettempdir()) / "argo_log_viewer_icons"
+    icon_dir.mkdir(exist_ok=True)
+    icon_path = icon_dir / "checkmark.png"
+    
+    if not icon_path.exists():
+        from PySide6.QtGui import QPixmap, QPainter, QPen, QColor
+        from PySide6.QtCore import Qt
+        
+        pixmap = QPixmap(16, 16)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        pen = QPen(QColor("#FFFFFF"))
+        pen.setWidth(2)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        
+        # Draw checkmark
+        painter.drawLine(4, 8, 7, 11)
+        painter.drawLine(7, 11, 12, 4)
+        
+        painter.end()
+        pixmap.save(str(icon_path))
+    
+    return str(icon_path).replace('\\', '/')
+
+
+def _get_radio_icon_path():
+    """Get path to radio dot icon, create if doesn't exist."""
+    icon_dir = Path(tempfile.gettempdir()) / "argo_log_viewer_icons"
+    icon_dir.mkdir(exist_ok=True)
+    icon_path = icon_dir / "radio_dot.png"
+    
+    if not icon_path.exists():
+        from PySide6.QtGui import QPixmap, QPainter, QColor
+        from PySide6.QtCore import Qt, QRect
+        
+        pixmap = QPixmap(16, 16)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setBrush(QColor("#4a9eff"))
+        painter.setPen(Qt.PenStyle.NoPen)
+        
+        # Draw inner circle
+        painter.drawEllipse(QRect(4, 4, 8, 8))
+        
+        painter.end()
+        pixmap.save(str(icon_path))
+    
+    return str(icon_path).replace('\\', '/')
+
 
 
 class BaseTheme:
@@ -46,6 +108,10 @@ class BaseTheme:
     @classmethod
     def get_main_stylesheet(cls) -> str:
         """Get the main application stylesheet."""
+        # Get icon paths
+        checkmark_icon = _get_checkbox_icon_path()
+        radio_icon = _get_radio_icon_path()
+        
         return f"""
             QWidget {{
                 background-color: {cls.background_color};
@@ -202,36 +268,58 @@ class BaseTheme:
                 height: 0px;
             }}
             QCheckBox {{
-                spacing: 8px;
+                spacing: 10px;
                 color: {cls.text_color};
+                font-weight: 500;
             }}
             QCheckBox::indicator {{
-                width: 18px;
-                height: 18px;
+                width: 22px;
+                height: 22px;
                 border: 2px solid {cls.border_color};
-                border-radius: 3px;
+                border-radius: 4px;
                 background-color: {cls.input_background};
             }}
             QCheckBox::indicator:checked {{
                 background-color: {cls.primary_accent};
-                border-color: {cls.primary_accent};
+                border: 2px solid {cls.primary_accent};
+                image: url({checkmark_icon});
+            }}
+            QCheckBox::indicator:unchecked {{
+                background-color: {cls.input_background};
+                border: 2px solid {cls.border_color};
             }}
             QCheckBox::indicator:checked:hover {{
                 background-color: {cls.button_hover};
+                border: 2px solid {cls.button_hover};
+            }}
+            QCheckBox::indicator:hover {{
+                border-color: {cls.primary_accent};
             }}
             QRadioButton {{
-                spacing: 8px;
+                spacing: 10px;
                 color: {cls.text_color};
+                font-weight: 500;
             }}
             QRadioButton::indicator {{
-                width: 18px;
-                height: 18px;
+                width: 22px;
+                height: 22px;
                 border: 2px solid {cls.border_color};
-                border-radius: 9px;
+                border-radius: 11px;
                 background-color: {cls.input_background};
             }}
             QRadioButton::indicator:checked {{
-                background-color: {cls.primary_accent};
+                background-color: {cls.input_background};
+                border: 2px solid {cls.primary_accent};
+                image: url({radio_icon});
+            }}
+            QRadioButton::indicator:unchecked {{
+                background-color: {cls.input_background};
+                border: 2px solid {cls.border_color};
+            }}
+            QRadioButton::indicator:checked:hover {{
+                border: 2px solid {cls.button_hover};
+            }}
+            QRadioButton::indicator:hover {{
                 border-color: {cls.primary_accent};
             }}
             QSpinBox {{

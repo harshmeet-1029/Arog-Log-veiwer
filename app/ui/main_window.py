@@ -79,10 +79,6 @@ class MainWindow(QWidget):
         self.search_occurrences = []
         self.current_occurrence_index = -1
         
-        # Feature flags
-        self.show_line_numbers = AppConfig.get_show_line_numbers()
-        self.enable_log_highlighting = AppConfig.get_enable_log_highlighting()
-        
         # Auto-reconnect settings
         self.auto_reconnect_enabled = AppConfig.get_auto_reconnect()
         self.reconnect_attempts = 0
@@ -358,21 +354,7 @@ class MainWindow(QWidget):
         
         settings_menu.addSeparator()
         
-        # View options
-        self.line_numbers_action = QAction("Show Line Numbers", self)
-        self.line_numbers_action.setCheckable(True)
-        self.line_numbers_action.setChecked(self.show_line_numbers)
-        self.line_numbers_action.setStatusTip("Toggle line numbers in log view")
-        self.line_numbers_action.triggered.connect(self._toggle_line_numbers)
-        settings_menu.addAction(self.line_numbers_action)
-        
-        self.log_highlighting_action = QAction("Enable Log Highlighting", self)
-        self.log_highlighting_action.setCheckable(True)
-        self.log_highlighting_action.setChecked(self.enable_log_highlighting)
-        self.log_highlighting_action.setStatusTip("Color-code logs by level (ERROR, WARN, INFO)")
-        self.log_highlighting_action.triggered.connect(self._toggle_log_highlighting)
-        settings_menu.addAction(self.log_highlighting_action)
-        
+        # Auto-reconnect option
         self.auto_reconnect_action = QAction("Enable Auto-Reconnect", self)
         self.auto_reconnect_action.setCheckable(True)
         self.auto_reconnect_action.setChecked(self.auto_reconnect_enabled)
@@ -1395,39 +1377,6 @@ class MainWindow(QWidget):
         
         logger.info("Copied all logs to clipboard")
     
-    def _toggle_line_numbers(self, checked: bool):
-        """Toggle line numbers display."""
-        self.show_line_numbers = checked
-        AppConfig.set_show_line_numbers(checked)
-        logger.info(f"Line numbers {'enabled' if checked else 'disabled'}")
-        
-        # Note: Line numbers would require a custom widget or QPlainTextEdit
-        # For now, we'll show a message that this requires app restart
-        if checked:
-            QMessageBox.information(
-                self,
-                "Line Numbers",
-                "Line numbers feature is enabled!\n\n"
-                "Note: This feature is best visible when the app restarts."
-            )
-    
-    def _toggle_log_highlighting(self, checked: bool):
-        """Toggle log level highlighting."""
-        self.enable_log_highlighting = checked
-        AppConfig.set_enable_log_highlighting(checked)
-        logger.info(f"Log highlighting {'enabled' if checked else 'disabled'}")
-        
-        # Show info message
-        QMessageBox.information(
-            self,
-            "Log Highlighting",
-            f"Log highlighting {'enabled' if checked else 'disabled'}!\n\n"
-            f"{'Critical log levels will be highlighted:' if checked else 'Logs will be displayed in default colors.'}\n"
-            f"{'• ERROR/FATAL/EXCEPTION → Red' if checked else ''}\n"
-            f"{'• WARN/WARNING → Orange' if checked else ''}\n\n"
-            f"(INFO/DEBUG not colored to avoid clutter)"
-        )
-    
     def _toggle_auto_reconnect(self, checked: bool):
         """Toggle auto-reconnect feature."""
         self.auto_reconnect_enabled = checked
@@ -1454,8 +1403,6 @@ class MainWindow(QWidget):
         confirm.setInformativeText(
             "This will reset:\n"
             "• Theme (Dark Mode)\n"
-            "• Line Numbers (OFF)\n"
-            "• Log Highlighting (OFF)\n"
             "• Auto-Reconnect (ON)\n"
             "• Log Buffer Limit (Unlimited)\n"
             "• Memory Warnings (ON)\n"
@@ -1474,8 +1421,6 @@ class MainWindow(QWidget):
                 
                 # Reset all settings to defaults
                 AppConfig.set_theme("dark")
-                AppConfig.set_show_line_numbers(False)
-                AppConfig.set_enable_log_highlighting(False)
                 AppConfig.set_auto_reconnect(True)
                 AppConfig.set_log_buffer_limit(0)  # Unlimited
                 AppConfig.set_show_memory_warnings(True)
@@ -1768,42 +1713,15 @@ class MainWindow(QWidget):
         self.console_output.moveCursor(QTextCursor.MoveOperation.End)
     
     def _append_log(self, text):
-        """Append text to log output with optional syntax highlighting."""
+        """Append text to log output."""
         # Smart scroll: Check if user is actually at the bottom using scrollbar position
         # IMPORTANT: Check BEFORE adding new text, as maximum will change!
         scrollbar = self.log_output.verticalScrollBar()
         was_at_bottom = scrollbar.value() >= scrollbar.maximum() - 10  # Allow small margin
         
-        # Move cursor to end
+        # Move cursor to end and insert text
         cursor = self.log_output.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
-        
-        # Apply log level highlighting if enabled
-        if self.enable_log_highlighting and text.strip():
-            text_upper = text.upper()
-            color = None
-            
-            # ONLY color critical levels - not INFO (too common)
-            # Use word boundaries to avoid false positives
-            import re
-            if re.search(r'\b(ERROR|FATAL|CRITICAL|EXCEPTION)\b', text_upper):
-                color = QColor("#F44336")  # Red for errors
-            elif re.search(r'\b(WARN|WARNING)\b', text_upper):
-                color = QColor("#FFA726")  # Orange for warnings
-            
-            # Apply color formatting only if we found a critical level
-            if color:
-                format = QTextCharFormat()
-                format.setForeground(color)
-                cursor.setCharFormat(format)
-            else:
-                # Use default format (no color)
-                cursor.setCharFormat(QTextCharFormat())
-        else:
-            # No highlighting, use default format
-            cursor.setCharFormat(QTextCharFormat())
-        
-        # Insert text
         cursor.insertText(text)
         self.log_output.setTextCursor(cursor)
         
