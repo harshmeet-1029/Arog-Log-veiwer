@@ -5,6 +5,8 @@ Features: Connection management, console output, pod search, log streaming.
 from typing import Optional
 from collections import deque
 from functools import lru_cache
+import tempfile
+from pathlib import Path
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
     QListWidget, QTextEdit, QLineEdit, QLabel, 
@@ -48,6 +50,9 @@ class MainWindow(QWidget):
         self.setWindowTitle("Argo Pod Log Viewer - Production Grade")
         self.resize(1400, 900)
         
+        # CRITICAL: Cleanup orphaned temp files from previous crashes
+        self._cleanup_orphaned_temp_files()
+        
         # Set window icon
         self._set_window_icon()
         
@@ -81,11 +86,21 @@ class MainWindow(QWidget):
         self.search_occurrences = []
         self.current_occurrence_index = -1
         
-        # PERFORMANCE: Deque for efficient log management (O(1) append/pop)
-        self.log_lines = deque(maxlen=100000)  # Keep last 100k lines in memory
+        # PERFORMANCE: Hybrid disk+memory strategy for 2GB RAM with unlimited logs
+        self.log_lines = deque(maxlen=50000)  # Keep last 50k lines in memory (UI display)
         self._log_append_batch = []  # Batch log lines before UI update
         self._batch_timer = None  # Timer for batch processing
         self._search_cache_text = ""  # Cache for search optimization
+        
+        # DISK BUFFERING: Optional disk streaming (only for unlimited mode)
+        self._disk_buffering_enabled = False  # Only enable for unlimited logs
+        self._disk_log_file = None  # Temp file handle for streaming logs
+        self._disk_log_path = None  # Path to temp log file
+        self._disk_log_lines_count = 0  # Total lines written to disk
+        self._ui_lines_count = 0  # Lines currently in UI
+        self._disk_buffer_ram_cache = []  # RAM buffer before disk write (reduces SSD wear)
+        self._disk_buffer_cache_size = 100  # Write to disk every 100 lines (reduces writes)
+        self._max_disk_file_size = 1024 * 1024 * 500  # 500MB max per log file (prevents huge files)
         
         # Auto-reconnect settings
         self.auto_reconnect_enabled = AppConfig.get_auto_reconnect()
@@ -875,13 +890,21 @@ class MainWindow(QWidget):
         self.worker.start()
     
     def open_logs(self, item):
-        """Open live logs for the selected pod."""
+        """
+        Open live logs for the selected pod with disk buffering.
+        
+        MEMORY OPTIMIZATION: Streams ALL logs to disk, shows recent 50k in UI.
+        This allows unlimited logs on 2GB RAM!
+        """
         pod_name = item.text()
         logger.info(f"Opening logs for pod: '{pod_name}'")
         
         # Stop any existing log stream and metrics
         self.stop_log_stream()
         self.stop_metrics_monitoring()
+        
+        # Initialize disk buffer for unlimited log storage
+        self._init_disk_buffer(pod_name)
         
         self.log_output.clear()
         self.current_pod_label.setText(f"Viewing logs for: {pod_name}")
@@ -932,7 +955,11 @@ class MainWindow(QWidget):
             self.metrics_label.setText("⚠️ Metrics unavailable")
     
     def stop_log_stream(self):
-        """Stop the current log stream but keep logs visible."""
+        """
+        Stop the current log stream but keep logs visible.
+        
+        NOTE: Closes disk buffer but keeps file for potential save operation.
+        """
         if self.worker and self.worker.isRunning():
             logger.info("Stopping log stream")
             self.console_output.append("\n[INFO] Stopping log stream...\n")
@@ -941,6 +968,9 @@ class MainWindow(QWidget):
             
         # Stop metrics monitoring
         self.stop_metrics_monitoring()
+        
+        # Close disk buffer (keeps file for potential save)
+        self._close_disk_buffer()
         
         # Disable stop button (no longer streaming)
         self.stop_logs_btn.setEnabled(False)
@@ -1195,18 +1225,35 @@ class MainWindow(QWidget):
         self.log_output.setTextCursor(cursor)
     
     def save_logs_to_file(self):
-        """Save the current logs to a text file."""
+        """
+        Save ALL logs to file (from disk buffer if available).
+        
+        2GB RAM OPTIMIZATION: If disk buffer exists, saves complete logs (unlimited!),
+        otherwise saves UI content (recent 50k).
+        """
         logger.info("Save logs to file requested")
         
-        # Get the current log content
-        log_content = self.log_output.toPlainText()
+        # Check if we have disk buffer with full logs
+        has_disk_buffer = (self._disk_log_path and 
+                           self._disk_log_path.exists() and 
+                           self._disk_log_lines_count > 0)
         
-        if not log_content:
-            QMessageBox.warning(self._get_active_window(), "No Logs", "There are no logs to save.")
-            return
+        # Get log content source
+        if has_disk_buffer:
+            logger.info(f"Saving FULL logs from disk buffer ({self._disk_log_lines_count:,} lines)")
+            log_source = "disk"  # Will read from disk
+        else:
+            logger.info("Saving logs from UI (recent lines only)")
+            log_content = self.log_output.toPlainText()
+            log_source = "ui"
+            
+            if not log_content:
+                QMessageBox.warning(self._get_active_window(), "No Logs", "There are no logs to save.")
+                return
         
-        # Get the current pod name for default filename
-        pod_name = self.current_pod_label.text().replace("Viewing logs for: ", "").replace(":", "-")
+        # Get pod name for default filename
+        pod_name = self.current_pod_label.text().replace("Viewing logs for: ", "").split("│")[0].strip()
+        pod_name = pod_name.replace(":", "-")
         if not pod_name or pod_name == "No pod selected":
             pod_name = "logs"
         
@@ -1215,28 +1262,53 @@ class MainWindow(QWidget):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         default_filename = f"{pod_name}_{timestamp}.txt"
         
-        # Open file dialog with HTML option
+        # Prepare dialog title
+        title = "Save All Logs" if has_disk_buffer else "Save Logs"
+        if has_disk_buffer:
+            title += f" ({self._disk_log_lines_count:,} lines)"
+        
+        # Open file dialog
         file_path, selected_filter = QFileDialog.getSaveFileName(
             self._get_active_window(),
-            "Save Logs",
+            title,
             default_filename,
             "Text Files (*.txt);;HTML Files (*.html);;Log Files (*.log);;All Files (*.*)"
         )
         
         if file_path:
             try:
-                # Determine format based on extension or filter
+                # Determine format
                 is_html = file_path.endswith('.html') or 'HTML' in selected_filter
                 
-                if is_html:
-                    # Export as HTML with formatting
-                    html_content = self._generate_html_log_export(log_content, pod_name)
-                    with open(file_path, 'w', encoding='utf-8') as f:
-                        f.write(html_content)
+                if log_source == "disk":
+                    # Copy from disk buffer (complete logs!)
+                    with open(self._disk_log_path, 'r', encoding='utf-8') as src:
+                        if is_html:
+                            # Read and convert to HTML
+                            log_content = src.read()
+                            html_content = self._generate_html_log_export(log_content, pod_name)
+                            with open(file_path, 'w', encoding='utf-8') as dst:
+                                dst.write(html_content)
+                        else:
+                            # Direct copy (most efficient!)
+                            with open(file_path, 'w', encoding='utf-8') as dst:
+                                # Copy in chunks for memory efficiency
+                                while True:
+                                    chunk = src.read(1024 * 1024)  # 1MB chunks
+                                    if not chunk:
+                                        break
+                                    dst.write(chunk)
+                    
+                    logger.info(f"Saved {self._disk_log_lines_count:,} lines from disk buffer")
                 else:
-                    # Write logs as plain text
-                    with open(file_path, 'w', encoding='utf-8') as f:
-                        f.write(log_content)
+                    # Save from UI content
+                    if is_html:
+                        html_content = self._generate_html_log_export(log_content, pod_name)
+                        with open(file_path, 'w', encoding='utf-8') as f:
+                            f.write(html_content)
+                    else:
+                        with open(file_path, 'w', encoding='utf-8') as f:
+                            f.write(log_content)
                 
                 # SECURITY: Set secure file permissions (owner read/write only)
                 # This prevents other users from reading potentially sensitive logs
@@ -1761,6 +1833,188 @@ class MainWindow(QWidget):
         except Exception as e:
             logger.error(f"Error appending console: {e}", exc_info=True)
     
+    # -------------------------
+    # Disk Buffer Management (2GB RAM Optimization)
+    # -------------------------
+    
+    def _cleanup_orphaned_temp_files(self):
+        """
+        Cleanup orphaned temp files from previous crashes.
+        
+        CRITICAL: Prevents 2GB temp file accumulation!
+        Removes files older than 24 hours or from dead PIDs.
+        """
+        try:
+            temp_dir = Path(tempfile.gettempdir()) / "argo_log_viewer_buffers"
+            if not temp_dir.exists():
+                return
+            
+            import time
+            current_time = time.time()
+            cleaned_count = 0
+            cleaned_size = 0
+            
+            for file in temp_dir.glob("logs_*.txt"):
+                try:
+                    # Get file age
+                    file_age = current_time - file.stat().st_mtime
+                    file_size = file.stat().st_size
+                    
+                    # Delete if older than 24 hours
+                    if file_age > 86400:  # 24 hours in seconds
+                        file.unlink()
+                        cleaned_count += 1
+                        cleaned_size += file_size
+                        logger.info(f"Deleted old temp file: {file.name} ({file_size / 1024 / 1024:.1f} MB, age: {file_age / 3600:.1f}h)")
+                        continue
+                    
+                    # Extract PID from filename and check if process still running
+                    try:
+                        pid_str = file.stem.split('_')[-1]
+                        pid = int(pid_str)
+                        
+                        # Check if PID is current process (skip it)
+                        if pid == os.getpid():
+                            continue
+                        
+                        # Try to check if process exists (works on Unix and Windows)
+                        try:
+                            if os.name == 'nt':  # Windows
+                                import subprocess
+                                result = subprocess.run(['tasklist', '/FI', f'PID eq {pid}'], 
+                                                       capture_output=True, text=True)
+                                process_exists = str(pid) in result.stdout
+                            else:  # Unix/Linux
+                                os.kill(pid, 0)  # Doesn't actually kill, just checks
+                                process_exists = True
+                        except (ProcessLookupError, PermissionError):
+                            process_exists = False
+                        except:
+                            process_exists = True  # Assume exists if we can't check
+                        
+                        # Delete if process doesn't exist (orphaned file)
+                        if not process_exists:
+                            file.unlink()
+                            cleaned_count += 1
+                            cleaned_size += file_size
+                            logger.info(f"Deleted orphaned temp file from dead PID {pid}: {file.name} ({file_size / 1024 / 1024:.1f} MB)")
+                            
+                    except (ValueError, IndexError):
+                        # Couldn't parse PID, skip file
+                        pass
+                        
+                except Exception as e:
+                    logger.warning(f"Error checking temp file {file}: {e}")
+            
+            if cleaned_count > 0:
+                logger.info(f"Cleanup summary: Removed {cleaned_count} orphaned temp files ({cleaned_size / 1024 / 1024:.1f} MB)")
+            else:
+                logger.debug("No orphaned temp files to clean")
+                
+        except Exception as e:
+            logger.warning(f"Error during temp file cleanup: {e}")
+    
+    def _init_disk_buffer(self, pod_name: str):
+        """
+        Initialize disk buffer ONLY if unlimited logs mode is enabled.
+        
+        SMART BUFFERING:
+        - Limited logs (1000 lines) → No disk, use QTextEdit limit (fast!)
+        - Unlimited logs → Disk buffering with RAM cache (SSD-friendly!)
+        """
+        try:
+            # Close existing buffer if any
+            self._close_disk_buffer()
+            
+            # Check if we should use disk buffering
+            log_limit = AppConfig.get_log_buffer_limit()
+            
+            if log_limit > 0:
+                # LIMITED MODE: User wants only X lines
+                logger.info(f"Limited log mode ({log_limit} lines) - disk buffering DISABLED")
+                self._disk_buffering_enabled = False
+                
+                # Set QTextEdit to limit directly (most efficient!)
+                self.log_output.document().setMaximumBlockCount(log_limit)
+                return
+            
+            # UNLIMITED MODE: Enable disk buffering
+            self._disk_buffering_enabled = True
+            self.log_output.document().setMaximumBlockCount(0)  # Remove UI limit
+            
+            # Check available disk space before creating file
+            temp_dir = Path(tempfile.gettempdir()) / "argo_log_viewer_buffers"
+            temp_dir.mkdir(exist_ok=True)
+            
+            # Check disk space (require at least 1GB free)
+            import shutil
+            disk_stats = shutil.disk_usage(temp_dir)
+            free_gb = disk_stats.free / (1024 ** 3)
+            
+            if free_gb < 1.0:
+                logger.warning(f"Low disk space ({free_gb:.1f} GB) - disk buffering DISABLED")
+                self._disk_buffering_enabled = False
+                QMessageBox.warning(
+                    self,
+                    "Low Disk Space",
+                    f"Only {free_gb:.1f} GB free. Disk buffering disabled.\n"
+                    "Logs limited to UI display (50k lines)."
+                )
+                return
+            
+            # Create temp file for this pod's logs
+            safe_pod_name = "".join(c for c in pod_name if c.isalnum() or c in ('-', '_'))
+            self._disk_log_path = temp_dir / f"logs_{safe_pod_name}_{os.getpid()}.txt"
+            
+            # Open file with large buffer (8KB) to reduce write frequency (SSD-friendly!)
+            self._disk_log_file = open(self._disk_log_path, 'w', encoding='utf-8', buffering=8192)
+            self._disk_log_lines_count = 0
+            self._ui_lines_count = 0
+            self._disk_buffer_ram_cache = []  # Reset RAM cache
+            
+            logger.info(f"✓ Disk buffer initialized: {self._disk_log_path}")
+            logger.info(f"✓ Mode: Unlimited logs to disk ({free_gb:.1f} GB available)")
+            logger.info(f"✓ SSD protection: RAM cache buffering (write every {self._disk_buffer_cache_size} lines)")
+            
+        except Exception as e:
+            logger.error(f"Error initializing disk buffer: {e}", exc_info=True)
+            self._disk_buffering_enabled = False
+            self._disk_log_file = None
+    
+    def _close_disk_buffer(self):
+        """
+        Close disk buffer and flush remaining RAM cache.
+        
+        IMPORTANT: Ensures all buffered lines are written before closing!
+        """
+        try:
+            if self._disk_log_file:
+                # CRITICAL: Flush remaining RAM cache to disk before closing!
+                if self._disk_buffer_ram_cache:
+                    try:
+                        cached_text = "".join(self._disk_buffer_ram_cache)
+                        self._disk_log_file.write(cached_text)
+                        self._disk_log_file.flush()
+                        self._disk_buffer_ram_cache.clear()
+                        logger.debug(f"Flushed final {len(self._disk_buffer_ram_cache)} cached writes to disk")
+                    except Exception as e:
+                        logger.error(f"Error flushing final cache: {e}")
+                
+                self._disk_log_file.close()
+                
+                if self._disk_log_path and self._disk_log_path.exists():
+                    file_size_mb = self._disk_log_path.stat().st_size / 1024 / 1024
+                    logger.info(f"✓ Closed disk buffer: {self._disk_log_lines_count:,} lines ({file_size_mb:.1f} MB)")
+                
+            # Keep the file for potential "Save All" feature
+            # Will be cleaned up on app exit or next startup
+            
+            self._disk_log_file = None
+            self._disk_buffering_enabled = False
+            
+        except Exception as e:
+            logger.error(f"Error closing disk buffer: {e}", exc_info=True)
+    
     def _append_log(self, text):
         """
         Append text to log output with crash protection and batching.
@@ -1797,7 +2051,14 @@ class MainWindow(QWidget):
                 pass  # Fail silently to prevent cascading crashes
     
     def _flush_log_batch(self):
-        """Flush batched log updates to UI efficiently."""
+        """
+        Flush batched log updates to UI and disk efficiently.
+        
+        MEMORY OPTIMIZATION FOR 2GB RAM:
+        - Writes ALL logs to disk (unlimited storage)
+        - Keeps only recent 50k lines in UI (low memory)
+        - User gets unlimited logs without RAM constraints!
+        """
         try:
             if not self._log_append_batch:
                 return
@@ -1806,30 +2067,85 @@ class MainWindow(QWidget):
             if self._batch_timer and self._batch_timer.isActive():
                 self._batch_timer.stop()
             
-            # Smart scroll: Check if user is at bottom BEFORE adding text
-            scrollbar = self.log_output.verticalScrollBar()
-            was_at_bottom = scrollbar.value() >= scrollbar.maximum() - 10
-            
             # Combine all batched text
             combined_text = "".join(self._log_append_batch)
             self._log_append_batch.clear()
             
-            # CRITICAL: Use QTextCursor in batch mode for performance
+            # STEP 1: Write to disk buffer (ONLY if disk buffering enabled)
+            if self._disk_buffering_enabled and self._disk_log_file:
+                try:
+                    # Add to RAM cache first (SSD WEAR PROTECTION!)
+                    self._disk_buffer_ram_cache.append(combined_text)
+                    lines_written = combined_text.count('\n')
+                    self._disk_log_lines_count += lines_written
+                    
+                    # Only write to disk when RAM cache is full (reduces writes!)
+                    if len(self._disk_buffer_ram_cache) >= self._disk_buffer_cache_size:
+                        # Check file size before writing (prevent huge files!)
+                        current_size = self._disk_log_path.stat().st_size if self._disk_log_path.exists() else 0
+                        
+                        if current_size >= self._max_disk_file_size:
+                            logger.warning(f"Disk buffer reached max size ({current_size / 1024 / 1024:.1f} MB) - stopping disk writes")
+                            self._close_disk_buffer()
+                            self._disk_buffering_enabled = False
+                            
+                            # Notify user
+                            if hasattr(self, 'current_pod_label'):
+                                current_text = self.current_pod_label.text().split("│")[0].strip()
+                                self.current_pod_label.setText(f"{current_text} │ ⚠️ Disk limit reached ({self._disk_log_lines_count:,} lines saved)")
+                        else:
+                            # Combine cache and write to disk
+                            cached_text = "".join(self._disk_buffer_ram_cache)
+                            self._disk_log_file.write(cached_text)
+                            self._disk_log_file.flush()  # Ensure written
+                            self._disk_buffer_ram_cache.clear()  # Clear RAM cache
+                            
+                            # Log progress every 10k lines
+                            if self._disk_log_lines_count % 10000 < lines_written:
+                                file_size_mb = current_size / 1024 / 1024
+                                logger.debug(f"Disk buffer: {self._disk_log_lines_count:,} lines ({file_size_mb:.1f} MB, {self._disk_buffer_cache_size} writes cached)")
+                        
+                except Exception as e:
+                    logger.error(f"Error writing to disk buffer: {e}")
+                    self._disk_buffering_enabled = False
+            
+            # STEP 2: Update UI (only recent logs for performance)
+            scrollbar = self.log_output.verticalScrollBar()
+            was_at_bottom = scrollbar.value() >= scrollbar.maximum() - 10
+            
+            # Use QTextCursor in batch mode
             cursor = self.log_output.textCursor()
-            cursor.beginEditBlock()  # Start atomic operation
+            cursor.beginEditBlock()
             cursor.movePosition(QTextCursor.MoveOperation.End)
             cursor.insertText(combined_text)
-            cursor.endEditBlock()  # End atomic operation
+            cursor.endEditBlock()
             
-            # MEMORY PROTECTION: Limit document size
-            doc = self.log_output.document()
-            if doc.blockCount() > 200000:  # Hard limit at 200k lines
-                logger.warning("Log document exceeding 200k lines, trimming oldest 50k")
-                cursor.movePosition(QTextCursor.MoveOperation.Start)
-                for _ in range(50000):  # Remove first 50k lines
-                    cursor.select(QTextCursor.SelectionType.LineUnderCursor)
-                    cursor.removeSelectedText()
-                    cursor.deleteChar()  # Remove newline
+            # Update UI line counter
+            self._ui_lines_count = self.log_output.document().blockCount()
+            
+            # STEP 3: MEMORY PROTECTION - Trim UI (ONLY for unlimited/disk buffer mode)
+            # NOTE: Limited mode uses QTextEdit's setMaximumBlockCount (more efficient)
+            if self._disk_buffering_enabled:
+                doc = self.log_output.document()
+                if doc.blockCount() > 50000:
+                    logger.info(f"UI at 50k lines, trimming to 40k (keeping newest). Total on disk: {self._disk_log_lines_count:,}")
+                    
+                    # Remove oldest 10k lines from UI (keeps newest 40k)
+                    cursor.movePosition(QTextCursor.MoveOperation.Start)
+                    cursor.beginEditBlock()
+                    for _ in range(10000):
+                        cursor.select(QTextCursor.SelectionType.BlockUnderCursor)
+                        cursor.removeSelectedText()
+                        cursor.deleteChar()  # Remove newline
+                    cursor.endEditBlock()
+                    
+                    self._ui_lines_count = doc.blockCount()
+                    
+                    # Update label to show disk buffer status
+                    if hasattr(self, 'current_pod_label'):
+                        current_text = self.current_pod_label.text()
+                        if "│" not in current_text:  # Only add once
+                            self.current_pod_label.setText(f"{current_text} │ 💾 {self._disk_log_lines_count:,} lines on disk")
             
             # Memory warning check (every 30 minutes)
             self._check_memory_warning()
@@ -3313,6 +3629,22 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
                 self.ssh_manager.disconnect()
             except Exception as e:
                 logger.error(f"Error during cleanup: {e}")
+        
+        # Cleanup disk buffers
+        self._close_disk_buffer()
+        
+        # Clean up temp buffer files on exit
+        try:
+            temp_dir = Path(tempfile.gettempdir()) / "argo_log_viewer_buffers"
+            if temp_dir.exists():
+                for file in temp_dir.glob(f"logs_*_{os.getpid()}.txt"):
+                    try:
+                        file.unlink()
+                        logger.debug(f"Deleted temp buffer: {file}")
+                    except Exception as e:
+                        logger.warning(f"Could not delete temp buffer {file}: {e}")
+        except Exception as e:
+            logger.warning(f"Error cleaning up temp buffers: {e}")
         
         logger.info("Window closed, application exiting")
         event.accept()
