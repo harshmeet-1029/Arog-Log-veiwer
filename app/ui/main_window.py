@@ -3,6 +3,8 @@ Production-grade main window for Argo Log Viewer.
 Features: Connection management, console output, pod search, log streaming.
 """
 from typing import Optional
+from collections import deque
+from functools import lru_cache
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
     QListWidget, QTextEdit, QLineEdit, QLabel, 
@@ -78,6 +80,12 @@ class MainWindow(QWidget):
         self.current_search_term = ""
         self.search_occurrences = []
         self.current_occurrence_index = -1
+        
+        # PERFORMANCE: Deque for efficient log management (O(1) append/pop)
+        self.log_lines = deque(maxlen=100000)  # Keep last 100k lines in memory
+        self._log_append_batch = []  # Batch log lines before UI update
+        self._batch_timer = None  # Timer for batch processing
+        self._search_cache_text = ""  # Cache for search optimization
         
         # Auto-reconnect settings
         self.auto_reconnect_enabled = AppConfig.get_auto_reconnect()
@@ -224,26 +232,51 @@ class MainWindow(QWidget):
         return self
     
     def _find_all_occurrences(self, search_text):
-        """Find all occurrences of search text and return their positions (start positions)."""
+        """
+        Find all occurrences of search text with caching optimization.
+        Uses document text hash to avoid re-scanning unchanged content.
+        """
         if not search_text:
             return []
         
-        occurrences = []
-        document = self.log_output.document()
-        cursor = QTextCursor(document)
-        cursor.movePosition(QTextCursor.MoveOperation.Start)
-        
-        # Find all occurrences
-        while True:
-            cursor = document.find(search_text, cursor, QTextDocument.FindFlag(0))
-            if cursor.isNull():
-                break
-            # cursor.position() is at the END of the match after find()
-            # Store the START position for proper jumping
-            start_pos = cursor.position() - len(search_text)
-            occurrences.append(start_pos)
-        
-        return occurrences
+        try:
+            # PERFORMANCE: Check cache first
+            current_text = self.log_output.toPlainText()
+            cache_key = f"{search_text}:{len(current_text)}"
+            
+            if cache_key == self._search_cache_text and hasattr(self, '_cached_occurrences'):
+                logger.debug("Using cached search results")
+                return self._cached_occurrences
+            
+            occurrences = []
+            document = self.log_output.document()
+            cursor = QTextCursor(document)
+            cursor.movePosition(QTextCursor.MoveOperation.Start)
+            
+            # PERFORMANCE: Limit search iterations to prevent hang
+            max_iterations = 50000  # Safety limit
+            iterations = 0
+            
+            while iterations < max_iterations:
+                cursor = document.find(search_text, cursor, QTextDocument.FindFlag(0))
+                if cursor.isNull():
+                    break
+                start_pos = cursor.position() - len(search_text)
+                occurrences.append(start_pos)
+                iterations += 1
+            
+            if iterations >= max_iterations:
+                logger.warning(f"Search hit iteration limit at {max_iterations} matches")
+            
+            # Cache results
+            self._search_cache_text = cache_key
+            self._cached_occurrences = occurrences
+            
+            return occurrences
+            
+        except Exception as e:
+            logger.error(f"Error finding occurrences: {e}", exc_info=True)
+            return []
     
     def _update_match_counter(self):
         """Update the match counter label."""
@@ -994,78 +1027,78 @@ class MainWindow(QWidget):
         QTimer.singleShot(500, self.start_metrics_monitoring)  # Quick retry
     
     def _update_metrics_display(self, metrics_text: str):
-        """Update the metrics display with new data - compact single line format.
-        
-        PERFORMANCE: Throttle UI updates to prevent freezing during heavy log streaming.
         """
-        import time
+        Update the metrics display with crash protection and optimized throttling.
         
-        # Throttle metrics UI updates to max once per 2 seconds
-        # This prevents UI freezing when logs are streaming heavily
-        current_time = time.time()
-        if current_time - self._last_metrics_update < 2.0:
-            # Skip this update, too soon since last one
-            return
-        
-        self._last_metrics_update = current_time
-        
-        # Parse the metrics to extract CPU and Memory
-        lines = metrics_text.strip().split('\n')
-        cpu_usage = "N/A"
-        memory_usage = "N/A"
-        
-        for line in lines:
-            line = line.strip()
+        PERFORMANCE: Throttle UI updates to max once per 2 seconds to prevent freezing.
+        """
+        try:
+            import time
             
-            # Skip empty lines
-            if not line:
-                continue
+            # Throttle metrics UI updates to max once per 2 seconds
+            current_time = time.time()
+            if current_time - self._last_metrics_update < 2.0:
+                return  # Skip this update, too soon
             
-            # Skip command echoes (lines containing "kubectl" or "top")
-            if "kubectl" in line.lower() or line.startswith("$") or line.startswith("#"):
-                continue
+            self._last_metrics_update = current_time
             
-            parts = line.split()
-            if len(parts) >= 3:
-                # Skip header line
-                if parts[0] == "NAME" or "NAME" in line:
+            # Parse metrics - extract CPU and Memory
+            lines = metrics_text.strip().split('\n')
+            cpu_usage = "N/A"
+            memory_usage = "N/A"
+            
+            for line in lines[:50]:  # PERFORMANCE: Limit parsing to first 50 lines
+                line = line.strip()
+                
+                if not line or "kubectl" in line.lower() or line.startswith(("$", "#")):
                     continue
                 
-                # Format should be: POD_NAME CPU(cores) MEMORY(bytes)
-                # Example: henrys-prod-full-jnkw4-processing-step-1060948657   45m          147Mi
-                pod_name_part = parts[0]
+                parts = line.split()
+                if len(parts) >= 3 and parts[0] != "NAME" and "NAME" not in line:
+                    pod_name_part = parts[0]
+                    
+                    if "-" in pod_name_part and self.current_pod_for_metrics in pod_name_part:
+                        cpu_usage = parts[1] if len(parts) > 1 else "N/A"
+                        memory_usage = parts[2] if len(parts) > 2 else "N/A"
+                        logger.debug(f"Parsed metrics - CPU: {cpu_usage}, Memory: {memory_usage}")
+                        break
+            
+            # Ultra-compact display format
+            metrics_text = f"│ 📊 CPU: {cpu_usage} • Memory: {memory_usage}"
+            self.metrics_label.setText(metrics_text)
+            
+            # Update fullscreen metrics if active
+            if self.is_fullscreen and hasattr(self, 'fullscreen_metrics_label'):
+                self.fullscreen_metrics_label.setText(metrics_text)
                 
-                # Verify this looks like a pod name (contains hyphens)
-                if "-" in pod_name_part and self.current_pod_for_metrics in pod_name_part:
-                    cpu_usage = parts[1] if len(parts) > 1 else "N/A"
-                    memory_usage = parts[2] if len(parts) > 2 else "N/A"
-                    logger.debug(f"Parsed metrics - CPU: {cpu_usage}, Memory: {memory_usage}")
-                    break
-        
-        # Ultra-compact single line format
-        metrics_text = f"│ 📊 CPU: {cpu_usage} • Memory: {memory_usage}"
-        self.metrics_label.setText(metrics_text)
-        
-        # Update fullscreen metrics label if in fullscreen mode
-        if self.is_fullscreen and hasattr(self, 'fullscreen_metrics_label'):
-            self.fullscreen_metrics_label.setText(metrics_text)
+        except Exception as e:
+            logger.error(f"Error updating metrics display: {e}", exc_info=True)
+            try:
+                self.metrics_label.setText("│ ⚠️ Metrics error")
+            except:
+                pass  # Fail silently
     
     def _on_metrics_error(self, error_msg: str):
-        """Handle error from metrics worker.
-        
-        NOTE: Metrics errors do NOT affect log streaming - logs will continue to work.
         """
-        logger.warning(f"Metrics worker error (logs unaffected): {error_msg}")
+        Handle metrics worker error with crash protection.
         
-        # User-friendly compact error message
-        if "Metrics API not available" in error_msg or "Metrics server not available" in error_msg:
-            self.metrics_label.setText("│ ⚠️ Metrics server not installed")
-            self.metrics_label.setToolTip("Install metrics-server in cluster for resource monitoring. Logs are working normally.")
-        else:
-            self.metrics_label.setText("│ ⚠️ Metrics unavailable")
-            self.metrics_label.setToolTip(f"Error: {error_msg}. Logs are working normally.")
-        
-        self.is_monitoring_metrics = False
+        NOTE: Metrics errors do NOT affect log streaming.
+        """
+        try:
+            logger.warning(f"Metrics worker error (logs unaffected): {error_msg}")
+            
+            # User-friendly error message
+            if "Metrics API not available" in error_msg or "Metrics server not available" in error_msg:
+                self.metrics_label.setText("│ ⚠️ Metrics server not installed")
+                self.metrics_label.setToolTip("Install metrics-server in cluster for resource monitoring. Logs are working normally.")
+            else:
+                self.metrics_label.setText("│ ⚠️ Metrics unavailable")
+                self.metrics_label.setToolTip(f"Error: {error_msg}. Logs are working normally.")
+            
+            self.is_monitoring_metrics = False
+            
+        except Exception as e:
+            logger.error(f"Error in _on_metrics_error: {e}", exc_info=True)
     
     def find_in_logs(self):
         """Find text in the log output (case-insensitive)."""
@@ -1588,110 +1621,123 @@ class MainWindow(QWidget):
     # -------------------------
     
     def _on_connected(self):
-        """Handle successful connection."""
-        logger.info("Connection established signal received")
-        self._set_connected_state()
-        self.connect_btn.setText("Connect")
-        self.console_output.append("\n=== Ready for operations ===\n")
-        
-        # Reset reconnect counter on successful connection
-        self.reconnect_attempts = 0
-        
-        # Create a separate SSH connection for metrics (non-blocking)
+        """Handle successful connection with crash protection."""
         try:
-            logger.info("Creating separate SSH connection for metrics monitoring")
-            self.console_output.append("[INFO] Setting up metrics monitoring connection...\n")
+            logger.info("Connection established signal received")
+            self._set_connected_state()
+            self.connect_btn.setText("Connect")
+            self.console_output.append("\n=== Ready for operations ===\n")
             
-            from PySide6.QtCore import QThread
+            # Reset reconnect counter on successful connection
+            self.reconnect_attempts = 0
             
-            class MetricsConnectionWorker(QThread):
-                def __init__(self, parent):
-                    super().__init__(parent)
-                    self.ssh_manager = None
-                    self.error_msg = None
+            # Create a separate SSH connection for metrics (non-blocking)
+            try:
+                logger.info("Creating separate SSH connection for metrics monitoring")
+                self.console_output.append("[INFO] Setting up metrics monitoring connection...\n")
                 
-                def run(self):
-                    try:
-                        from app.ssh.connection_manager import SSHConnectionManager
-                        self.ssh_manager = SSHConnectionManager()
-                        self.ssh_manager.connect()
-                    except Exception as e:
-                        self.error_msg = str(e)
+                from PySide6.QtCore import QThread
+                
+                class MetricsConnectionWorker(QThread):
+                    def __init__(self, parent):
+                        super().__init__(parent)
+                        self.ssh_manager = None
+                        self.error_msg = None
+                    
+                    def run(self):
+                        try:
+                            from app.ssh.connection_manager import SSHConnectionManager
+                            self.ssh_manager = SSHConnectionManager()
+                            self.ssh_manager.connect()
+                        except Exception as e:
+                            self.error_msg = str(e)
+                
+                self.metrics_connection_worker = MetricsConnectionWorker(self)
+                
+                def on_metrics_connection_complete():
+                    if self.metrics_connection_worker.error_msg:
+                        logger.warning(f"Failed to create metrics connection: {self.metrics_connection_worker.error_msg}")
+                        self.console_output.append("[WARNING] Metrics connection failed - metrics will be unavailable\n")
+                    elif self.metrics_connection_worker.ssh_manager:
+                        self.ssh_manager_metrics = self.metrics_connection_worker.ssh_manager
+                        logger.info("Metrics SSH connection established")
+                        self.console_output.append("[OK] Metrics monitoring ready\n")
+                
+                self.metrics_connection_worker.finished.connect(on_metrics_connection_complete)
+                self.metrics_connection_worker.start()
+                
+            except Exception as e:
+                logger.warning(f"Failed to setup metrics connection: {e}")
             
-            self.metrics_connection_worker = MetricsConnectionWorker(self)
-            
-            def on_metrics_connection_complete():
-                if self.metrics_connection_worker.error_msg:
-                    logger.warning(f"Failed to create metrics connection: {self.metrics_connection_worker.error_msg}")
-                    self.console_output.append("[WARNING] Metrics connection failed - metrics will be unavailable\n")
-                elif self.metrics_connection_worker.ssh_manager:
-                    self.ssh_manager_metrics = self.metrics_connection_worker.ssh_manager
-                    logger.info("Metrics SSH connection established")
-                    self.console_output.append("[OK] Metrics monitoring ready\n")
-            
-            self.metrics_connection_worker.finished.connect(on_metrics_connection_complete)
-            self.metrics_connection_worker.start()
+            QMessageBox.information(self, "Connected", "SSH connection established successfully!")
             
         except Exception as e:
-            logger.warning(f"Failed to setup metrics connection: {e}")
-        
-        QMessageBox.information(self, "Connected", "SSH connection established successfully!")
+            logger.error(f"Error in _on_connected: {e}", exc_info=True)
     
     def _on_disconnected(self):
-        """Handle disconnection."""
-        logger.info("Disconnection signal received")
-        self._set_disconnected_state()
-        self.ssh_manager = None
-        self.console_output.append("\n=== Disconnected ===\n")
+        """Handle disconnection with crash protection."""
+        try:
+            logger.info("Disconnection signal received")
+            self._set_disconnected_state()
+            self.ssh_manager = None
+            self.console_output.append("\n=== Disconnected ===\n")
+        except Exception as e:
+            logger.error(f"Error in _on_disconnected: {e}", exc_info=True)
     
     def _on_pods_received(self, pods):
-        """Handle received pod list."""
-        logger.info(f"Received {len(pods)} pods")
-        self.pod_list.addItems(pods)
-        self.fetch_btn.setEnabled(True)
-        self.fetch_btn.setText("Search Pods")
-        self.refresh_btn.setEnabled(True)
-        self.refresh_btn.setText("🔄 Refresh All Pods")
-        
-        if not pods:
-            QMessageBox.information(self, "No Results", "No pods found matching the search keyword")
+        """Handle received pod list with crash protection."""
+        try:
+            logger.info(f"Received {len(pods)} pods")
+            self.pod_list.addItems(pods)
+            self.fetch_btn.setEnabled(True)
+            self.fetch_btn.setText("Search Pods")
+            self.refresh_btn.setEnabled(True)
+            self.refresh_btn.setText("🔄 Refresh All Pods")
+            
+            if not pods:
+                QMessageBox.information(self, "No Results", "No pods found matching the search keyword")
+        except Exception as e:
+            logger.error(f"Error in _on_pods_received: {e}", exc_info=True)
     
     def _on_error(self, error_msg):
-        """Handle error from worker with optional auto-reconnect."""
-        logger.error(f"Worker error: {error_msg}")
-        
-        # Check if this is an SSH connection error
-        is_ssh_error = any(keyword in error_msg.lower() for keyword in 
-                          ['connection', 'ssh', 'timeout', 'broken pipe', 'lost connection'])
-        
-        if is_ssh_error and self.auto_reconnect_enabled and self.reconnect_attempts < self.max_reconnect_attempts:
-            # Attempt auto-reconnect
-            self.reconnect_attempts += 1
-            logger.info(f"Auto-reconnect attempt {self.reconnect_attempts}/{self.max_reconnect_attempts}")
+        """Handle error from worker with crash protection and optional auto-reconnect."""
+        try:
+            logger.error(f"Worker error: {error_msg}")
             
-            # Show notification instead of error dialog
-            self.console_output.append(f"\n⚠️ Connection lost. Auto-reconnecting ({self.reconnect_attempts}/{self.max_reconnect_attempts})...\n")
+            # Check if this is an SSH connection error
+            is_ssh_error = any(keyword in error_msg.lower() for keyword in 
+                              ['connection', 'ssh', 'timeout', 'broken pipe', 'lost connection'])
             
-            # Schedule reconnect after 3 seconds
-            if self.reconnect_timer:
-                self.reconnect_timer.stop()
+            if is_ssh_error and self.auto_reconnect_enabled and self.reconnect_attempts < self.max_reconnect_attempts:
+                # Attempt auto-reconnect
+                self.reconnect_attempts += 1
+                logger.info(f"Auto-reconnect attempt {self.reconnect_attempts}/{self.max_reconnect_attempts}")
+                
+                # Show notification instead of error dialog
+                self.console_output.append(f"\n⚠️ Connection lost. Auto-reconnecting ({self.reconnect_attempts}/{self.max_reconnect_attempts})...\n")
+                
+                # Schedule reconnect after 3 seconds
+                if self.reconnect_timer:
+                    self.reconnect_timer.stop()
+                
+                self.reconnect_timer = QTimer(self)
+                self.reconnect_timer.setSingleShot(True)
+                self.reconnect_timer.timeout.connect(self._attempt_reconnect)
+                self.reconnect_timer.start(3000)  # 3 seconds delay
+            else:
+                # Show error dialog
+                QMessageBox.critical(self, "Error", error_msg)
+                
+                # Reset reconnect counter
+                self.reconnect_attempts = 0
             
-            self.reconnect_timer = QTimer(self)
-            self.reconnect_timer.setSingleShot(True)
-            self.reconnect_timer.timeout.connect(self._attempt_reconnect)
-            self.reconnect_timer.start(3000)  # 3 seconds delay
-        else:
-            # Show error dialog
-            QMessageBox.critical(self, "Error", error_msg)
-            
-            # Reset reconnect counter
-            self.reconnect_attempts = 0
-        
-        # Re-enable buttons
-        self.connect_btn.setEnabled(not self.is_connected)
-        self.connect_btn.setText("Connect")
-        self.fetch_btn.setEnabled(self.is_connected)
-        self.fetch_btn.setText("Fetch Pods")
+            # Re-enable buttons
+            self.connect_btn.setEnabled(not self.is_connected)
+            self.connect_btn.setText("Connect")
+            self.fetch_btn.setEnabled(self.is_connected)
+            self.fetch_btn.setText("Fetch Pods")
+        except Exception as e:
+            logger.error(f"Error in _on_error handler: {e}", exc_info=True)
     
     def _attempt_reconnect(self):
         """Attempt to reconnect to SSH."""
@@ -1707,51 +1753,113 @@ class MainWindow(QWidget):
         QTimer.singleShot(500, self.connect_to_server)
     
     def _append_console(self, text):
-        """Append text to console output."""
-        self.console_output.moveCursor(QTextCursor.MoveOperation.End)
-        self.console_output.insertPlainText(text)
-        self.console_output.moveCursor(QTextCursor.MoveOperation.End)
+        """Append text to console output with crash protection."""
+        try:
+            self.console_output.moveCursor(QTextCursor.MoveOperation.End)
+            self.console_output.insertPlainText(text)
+            self.console_output.moveCursor(QTextCursor.MoveOperation.End)
+        except Exception as e:
+            logger.error(f"Error appending console: {e}", exc_info=True)
     
     def _append_log(self, text):
-        """Append text to log output."""
-        # Smart scroll: Check if user is actually at the bottom using scrollbar position
-        # IMPORTANT: Check BEFORE adding new text, as maximum will change!
-        scrollbar = self.log_output.verticalScrollBar()
-        was_at_bottom = scrollbar.value() >= scrollbar.maximum() - 10  # Allow small margin
-        
-        # Move cursor to end and insert text
-        cursor = self.log_output.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.End)
-        cursor.insertText(text)
-        self.log_output.setTextCursor(cursor)
-        
-        # Memory warning check (every 30 minutes)
-        self._check_memory_warning()
-        
-        # PERFORMANCE FIX: Only update search if user has scrolled up or explicitly searching
-        # Don't re-index on every log line while streaming (expensive!)
-        if self.current_search_term and not was_at_bottom:
-            # Only update search when user is actively viewing search results
-            old_count = len(self.search_occurrences)
-            self.search_occurrences = self._find_all_occurrences(self.current_search_term)
-            new_count = len(self.search_occurrences)
+        """
+        Append text to log output with crash protection and batching.
+        Uses deque for efficient memory management and batches updates for performance.
+        """
+        try:
+            # Add to deque for efficient line management
+            for line in text.splitlines(keepends=True):
+                if line.strip():  # Only add non-empty lines
+                    self.log_lines.append(line)
             
-            # Update the counter display
-            self._update_match_counter()
+            # Add to batch for UI update
+            self._log_append_batch.append(text)
             
-            # If we were at a valid occurrence, try to stay there
-            if self.current_occurrence_index >= 0 and self.current_occurrence_index < len(self.search_occurrences):
-                # Re-highlight the current occurrence to keep selection visible
-                self._jump_to_occurrence(self.current_occurrence_index)
+            # If batch size is small, schedule batch processing
+            if len(self._log_append_batch) < 10:
+                if not self._batch_timer:
+                    self._batch_timer = QTimer(self)
+                    self._batch_timer.setSingleShot(True)
+                    self._batch_timer.timeout.connect(self._flush_log_batch)
+                if not self._batch_timer.isActive():
+                    self._batch_timer.start(50)  # Flush after 50ms
+                return
             
-            if new_count > old_count:
-                logger.debug(f"Search results updated: {old_count} -> {new_count} occurrences")
-        
-        # Smart scroll: Only auto-scroll if user was at bottom before new text arrived
-        if was_at_bottom:
-            # Scroll to the end
-            self.log_output.moveCursor(QTextCursor.MoveOperation.End)
-            self.log_output.ensureCursorVisible()
+            # If batch is large enough, flush immediately
+            self._flush_log_batch()
+            
+        except Exception as e:
+            logger.error(f"Error appending log: {e}", exc_info=True)
+            # Try to at least show the error
+            try:
+                self.log_output.append(f"\n⚠️ [Log Error: {str(e)}]\n")
+            except:
+                pass  # Fail silently to prevent cascading crashes
+    
+    def _flush_log_batch(self):
+        """Flush batched log updates to UI efficiently."""
+        try:
+            if not self._log_append_batch:
+                return
+            
+            # Stop the timer if active
+            if self._batch_timer and self._batch_timer.isActive():
+                self._batch_timer.stop()
+            
+            # Smart scroll: Check if user is at bottom BEFORE adding text
+            scrollbar = self.log_output.verticalScrollBar()
+            was_at_bottom = scrollbar.value() >= scrollbar.maximum() - 10
+            
+            # Combine all batched text
+            combined_text = "".join(self._log_append_batch)
+            self._log_append_batch.clear()
+            
+            # CRITICAL: Use QTextCursor in batch mode for performance
+            cursor = self.log_output.textCursor()
+            cursor.beginEditBlock()  # Start atomic operation
+            cursor.movePosition(QTextCursor.MoveOperation.End)
+            cursor.insertText(combined_text)
+            cursor.endEditBlock()  # End atomic operation
+            
+            # MEMORY PROTECTION: Limit document size
+            doc = self.log_output.document()
+            if doc.blockCount() > 200000:  # Hard limit at 200k lines
+                logger.warning("Log document exceeding 200k lines, trimming oldest 50k")
+                cursor.movePosition(QTextCursor.MoveOperation.Start)
+                for _ in range(50000):  # Remove first 50k lines
+                    cursor.select(QTextCursor.SelectionType.LineUnderCursor)
+                    cursor.removeSelectedText()
+                    cursor.deleteChar()  # Remove newline
+            
+            # Memory warning check (every 30 minutes)
+            self._check_memory_warning()
+            
+            # PERFORMANCE: Only update search if actively searching
+            if self.current_search_term and not was_at_bottom:
+                # Invalidate search cache
+                self._search_cache_text = ""
+                # Only update search when user is viewing results
+                old_count = len(self.search_occurrences)
+                self.search_occurrences = self._find_all_occurrences(self.current_search_term)
+                new_count = len(self.search_occurrences)
+                
+                self._update_match_counter()
+                
+                if self.current_occurrence_index >= 0 and self.current_occurrence_index < len(self.search_occurrences):
+                    self._jump_to_occurrence(self.current_occurrence_index)
+                
+                if new_count > old_count:
+                    logger.debug(f"Search results updated: {old_count} -> {new_count} occurrences")
+            
+            # Smart scroll: Only auto-scroll if user was at bottom
+            if was_at_bottom:
+                self.log_output.moveCursor(QTextCursor.MoveOperation.End)
+                self.log_output.ensureCursorVisible()
+                
+        except Exception as e:
+            logger.error(f"Error flushing log batch: {e}", exc_info=True)
+            # Clear batch to prevent infinite loops
+            self._log_append_batch.clear()
     
     # -------------------------
     # Theme Management
