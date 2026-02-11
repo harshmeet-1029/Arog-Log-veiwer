@@ -17,8 +17,37 @@ def setup_logging(log_level=logging.DEBUG, log_to_file=False):
     """
     # Create logs directory if it doesn't exist
     if log_to_file:
-        log_dir = Path("logs")
-        log_dir.mkdir(exist_ok=True)
+        # Determine log directory
+        # 1. Try local logs folder first (development mode)
+        # 2. Use user home directory for installed app or if local is not writable
+        
+        is_frozen = getattr(sys, 'frozen', False)
+        
+        # Determine the project root directory
+        if is_frozen:
+            # If frozen, use the executable's directory or temp dir (not used for log_dir calculation below usually)
+            base_dir = Path(sys.executable).parent
+        else:
+            # If script, use the project root (parent of app directory)
+            # This file is in app/logging_config.py, so parent.parent is project root
+            base_dir = Path(__file__).resolve().parent.parent
+
+        log_dir = base_dir / "logs"
+        use_user_dir = is_frozen
+        
+        if not use_user_dir:
+            try:
+                log_dir.mkdir(exist_ok=True)
+                # Test write permission
+                test_file = log_dir / ".test_write"
+                test_file.touch()
+                test_file.unlink()
+            except (OSError, PermissionError):
+                use_user_dir = True
+        
+        if use_user_dir:
+            log_dir = Path.home() / ".argo-log-viewer" / "logs"
+            log_dir.mkdir(parents=True, exist_ok=True)
         
         # Create log filename with timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

@@ -429,7 +429,7 @@ class UpdateConfig:
     )
     
     # Check for updates on startup
-    CHECK_ON_STARTUP = os.getenv("ARGO_CHECK_UPDATES_ON_STARTUP", "true").lower() in ('true', '1', 'yes')
+    CHECK_ON_STARTUP = True # os.getenv("ARGO_CHECK_UPDATES_ON_STARTUP", "true").lower() in ('true', '1', 'yes')
     
     # Update check interval in seconds (default: 24 hours)
     UPDATE_CHECK_INTERVAL = int(os.getenv("ARGO_UPDATE_CHECK_INTERVAL", str(24 * 60 * 60)))

@@ -29,19 +29,44 @@ def is_frozen():
     return getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')
 
 
+def global_exception_hook(exc_type, exc_value, exc_traceback):
+    """
+    Global exception hook to catch unhandled exceptions and log them.
+    Also shows a graphical error message to the user.
+    """
+    if issubclass(exc_type, KeyboardInterrupt):
+        # Allow Ctrl+C to exit normally
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+        return
+
+    logger.critical("Uncaught exception:", exc_info=(exc_type, exc_value, exc_traceback))
+    
+    # Try to show error dialog
+    try:
+        app = QApplication.instance()
+        if app:
+            error_msg = f"An unexpected error occurred:\n{exc_value}\n\nPlease check the logs for details."
+            QMessageBox.critical(None, "Critical Error", error_msg)
+    except:
+        pass
+
+
 def main():
     """
     Main entry point for the Argo Log Viewer application.
     Initializes logging, creates the Qt application, and starts the main window.
     """
-    # Determine if we should log to file (disable for .exe)
-    log_to_file = not is_frozen()
+    # Disable file logging completely (as requested: no logs stored for EXE users)
+    log_to_file = False
     
     # Setup logging with DEBUG level
     setup_logging(log_level=logging.DEBUG, log_to_file=log_to_file)
     
+    # Install global exception hook
+    sys.excepthook = global_exception_hook
+    
     if is_frozen():
-        logger.info("Running as compiled executable - file logging disabled")
+        logger.info("Running as compiled executable")
     else:
         logger.info("Running as Python script - file logging enabled")
     

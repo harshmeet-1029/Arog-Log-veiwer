@@ -102,6 +102,12 @@ class MainWindow(QWidget):
         self._disk_buffer_cache_size = 100  # Write to disk every 100 lines (reduces writes)
         self._max_disk_file_size = 1024 * 1024 * 500  # 500MB max per log file (prevents huge files)
         
+        # SMART SCROLL: On-demand loading for perfect UX
+        self._ui_start_line = 0  # First line number shown in UI (0-based)
+        self._ui_end_line = 0  # Last line number shown in UI
+        self._load_more_chunk_size = 10000  # Load 10k lines at a time
+        self._max_ui_lines = 200000  # Max lines in UI (200k for better UX on 2GB+ RAM systems)
+        
         # Auto-reconnect settings
         self.auto_reconnect_enabled = AppConfig.get_auto_reconnect()
         self.reconnect_attempts = 0
@@ -592,7 +598,7 @@ class MainWindow(QWidget):
         
         # Retry button for metrics (compact, next to metrics)
         self.retry_metrics_btn = QPushButton("🔄")
-        self.retry_metrics_btn.setToolTip("Retry fetching metrics")
+        self.retry_metrics_btn.setToolTip("Start/Refresh Metrics")
         self.retry_metrics_btn.setFixedSize(32, 28)  # Fixed size to prevent cutting
         self.retry_metrics_btn.setStyleSheet("""
             QPushButton {
@@ -640,7 +646,7 @@ class MainWindow(QWidget):
         self.log_search_input = QLineEdit()
         self.log_search_input.setPlaceholderText("Search in logs...")
         self.log_search_input.returnPressed.connect(self.handle_search_enter)
-        self.log_search_input.setMinimumWidth(200)
+        self.log_search_input.setMinimumWidth(300)  # Made significantly wider
         search_bar_layout.addWidget(self.log_search_input)
         
         # Match counter label
@@ -651,19 +657,22 @@ class MainWindow(QWidget):
         self.find_prev_btn = QPushButton("↑ Prev")
         self.find_prev_btn.clicked.connect(self.find_previous)
         self.find_prev_btn.setToolTip("Find previous (Shift+F3)")
-        self.find_prev_btn.setFixedHeight(25)
+        self.find_prev_btn.setFixedWidth(80) # Wider button
+        self.find_prev_btn.setFixedHeight(28) # Taller button
         search_bar_layout.addWidget(self.find_prev_btn)
         
         self.find_next_btn = QPushButton("Next ↓")
         self.find_next_btn.clicked.connect(self.find_next)
         self.find_next_btn.setToolTip("Find next (F3)")
-        self.find_next_btn.setFixedHeight(25)
+        self.find_next_btn.setFixedWidth(80) # Wider button
+        self.find_next_btn.setFixedHeight(28) # Taller button
         search_bar_layout.addWidget(self.find_next_btn)
         
         self.close_search_btn = QPushButton("Close")
         self.close_search_btn.clicked.connect(self.hide_search_bar)
         self.close_search_btn.setToolTip("Close (Esc)")
-        self.close_search_btn.setFixedHeight(25)
+        self.close_search_btn.setFixedWidth(80) # Wider button
+        self.close_search_btn.setFixedHeight(28) # Taller button
         search_bar_layout.addWidget(self.close_search_btn)
         
         search_bar_layout.addStretch()
@@ -671,6 +680,41 @@ class MainWindow(QWidget):
         # Hide search bar by default
         self.log_search_bar.setVisible(False)
         log_container_layout.addWidget(self.log_search_bar)
+        
+        # SMART SCROLL: Load older logs bar (for unlimited mode with disk buffering)
+        self.load_older_bar = QWidget()
+        self.load_older_bar.setStyleSheet("""
+            QWidget {
+                background-color: rgba(74, 158, 255, 0.15);
+                border: 1px solid rgba(74, 158, 255, 0.3);
+                border-radius: 4px;
+                padding: 5px;
+            }
+        """)
+        load_older_layout = QHBoxLayout(self.load_older_bar)
+        load_older_layout.setContentsMargins(10, 5, 10, 5)
+        
+        self.load_older_label = QLabel("📄 Older logs available on disk")
+        self.load_older_label.setStyleSheet("font-weight: bold; color: #4a9eff;")
+        load_older_layout.addWidget(self.load_older_label)
+        
+        load_older_layout.addStretch()
+        
+        self.load_older_btn = QPushButton("⬆ Load 10,000 Older Lines")
+        self.load_older_btn.setToolTip("Load older logs from disk buffer")
+        self.load_older_btn.clicked.connect(self._load_older_logs)
+        self.load_older_btn.setMinimumHeight(28)
+        load_older_layout.addWidget(self.load_older_btn)
+        
+        self.load_all_btn = QPushButton("⬆⬆ Load All")
+        self.load_all_btn.setToolTip("Load all logs from disk (may be slow for huge logs)")
+        self.load_all_btn.clicked.connect(self._load_all_logs)
+        self.load_all_btn.setMinimumHeight(28)
+        load_older_layout.addWidget(self.load_all_btn)
+        
+        # Hidden by default
+        self.load_older_bar.setVisible(False)
+        log_container_layout.addWidget(self.load_older_bar)
         
         # Log output text area
         self.log_output = QTextEdit()
@@ -846,6 +890,7 @@ class MainWindow(QWidget):
         
         self.refresh_btn.setEnabled(False)
         self.refresh_btn.setText("Refreshing...")
+        self.fetch_btn.setEnabled(False)  # Disable search while refreshing
         
         logger.info("Starting refresh worker")
         self.worker.start()
@@ -885,6 +930,7 @@ class MainWindow(QWidget):
         
         self.fetch_btn.setEnabled(False)
         self.fetch_btn.setText("Fetching...")
+        self.refresh_btn.setEnabled(False)  # Disable refresh while searching
         
         logger.info("Starting list_pods worker")
         self.worker.start()
@@ -905,6 +951,12 @@ class MainWindow(QWidget):
         
         # Initialize disk buffer for unlimited log storage
         self._init_disk_buffer(pod_name)
+        
+        # Reset UI tracking for smart scrolling
+        self._ui_start_line = 0
+        self._ui_end_line = 0
+        self._ui_lines_count = 0
+        self.load_older_bar.setVisible(False)  # Hide load older bar initially
         
         self.log_output.clear()
         self.current_pod_label.setText(f"Viewing logs for: {pod_name}")
@@ -931,9 +983,10 @@ class MainWindow(QWidget):
         self.fullscreen_btn.setVisible(True)
         self.save_logs_btn.setVisible(True)
         
-        # Show metrics label and retry button, start auto-monitoring
+        # Show metrics label and retry button, but DO NOT auto-start
+        # User must click refresh to start metrics (CRASH PROOFING)
         self.metrics_label.setVisible(True)
-        self.metrics_label.setText("📊 Loading metrics...")
+        self.metrics_label.setText("│ 📊 Click Refresh to load metrics")
         self.retry_metrics_btn.setVisible(True)
         
         logger.info("Starting logs worker")
@@ -943,16 +996,8 @@ class MainWindow(QWidget):
         import time
         self._stream_start_time = time.time()
         
-        # Auto-start metrics monitoring for this pod (non-blocking, won't affect logs)
-        # Wait a moment for logs to start, then start metrics in background
-        try:
-            from PySide6.QtCore import QTimer
-            logger.info(f"Scheduling metrics monitoring for: {pod_name}")
-            # Start metrics after 2 seconds to let logs stabilize
-            QTimer.singleShot(2000, self.start_metrics_monitoring)
-        except Exception as e:
-            logger.warning(f"Failed to schedule metrics monitoring (logs unaffected): {e}")
-            self.metrics_label.setText("⚠️ Metrics unavailable")
+        # Auto-start metrics monitoring REMOVED for stability
+        # User initiates it manually via refresh button
     
     def stop_log_stream(self):
         """
@@ -1040,14 +1085,14 @@ class MainWindow(QWidget):
             self.is_monitoring_metrics = False
     
     def retry_metrics(self):
-        """Manually retry fetching metrics for the current pod."""
+        """Manually start or retry fetching metrics for the current pod."""
         if not self.current_pod_for_metrics:
             logger.warning("No pod selected for metrics retry")
             QMessageBox.warning(self, "No Pod Selected", "Please select a pod first to view metrics.")
             return
         
-        logger.info(f"Manual metrics retry requested for pod: {self.current_pod_for_metrics}")
-        self.metrics_label.setText("│ 🔄 Retrying...")
+        logger.info(f"Manual metrics start/retry requested for pod: {self.current_pod_for_metrics}")
+        self.metrics_label.setText("│ 🔄 Starting metrics...")
         
         # Stop existing metrics monitoring and restart
         self.stop_metrics_monitoring()
@@ -1087,6 +1132,10 @@ class MainWindow(QWidget):
                 if len(parts) >= 3 and parts[0] != "NAME" and "NAME" not in line:
                     pod_name_part = parts[0]
                     
+                    # Verify we have a current pod selected before checking string inclusion
+                    if not self.current_pod_for_metrics:
+                        continue
+                        
                     if "-" in pod_name_part and self.current_pod_for_metrics in pod_name_part:
                         cpu_usage = parts[1] if len(parts) > 1 else "N/A"
                         memory_usage = parts[2] if len(parts) > 2 else "N/A"
@@ -1131,7 +1180,11 @@ class MainWindow(QWidget):
             logger.error(f"Error in _on_metrics_error: {e}", exc_info=True)
     
     def find_in_logs(self):
-        """Find text in the log output (case-insensitive)."""
+        """
+        Find text in the log output (case-insensitive).
+        
+        SMART SEARCH: If disk buffer exists with older logs, offers to search ALL logs!
+        """
         search_text = self.log_search_input.text().strip()
         if not search_text:
             logger.warning("No search text provided for log search")
@@ -1140,21 +1193,169 @@ class MainWindow(QWidget):
         
         logger.info(f"Searching logs for: '{search_text}' (case-insensitive)")
         
+        # Check if we have older logs on disk not shown in UI
+        has_older_logs = (self._disk_buffering_enabled and 
+                         self._disk_log_path and 
+                         self._disk_log_path.exists() and 
+                         self._ui_start_line > 0)
+        
+        if has_older_logs:
+            # Offer to search ALL logs (including disk)
+            reply = QMessageBox.question(
+                self._get_active_window(),
+                "Search Scope",
+                f"You have {self._ui_start_line:,} older lines on disk not currently displayed.\n\n"
+                f"Search in:\n"
+                f"• UI Only ({self._ui_lines_count:,} visible lines) - Fast\n"
+                f"• ALL Logs ({self._disk_log_lines_count:,} total lines) - May take a few seconds\n\n"
+                f"Search all logs?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes
+            )
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                # Search ALL logs (UI + disk)
+                self._search_all_logs(search_text)
+                return
+        
+        # Search UI only (fast path)
+        self._search_ui_logs(search_text)
+    
+    def _search_ui_logs(self, search_text: str):
+        """Search only currently visible logs in UI (fast)."""
         # Store the search term
         self.current_search_term = search_text
         
-        # Find all occurrences
+        # Find all occurrences in UI
         self.search_occurrences = self._find_all_occurrences(search_text)
         
         if self.search_occurrences:
             # Jump to first occurrence
             self._jump_to_occurrence(0)
-            logger.info(f"Found {len(self.search_occurrences)} occurrence(s) of '{search_text}'")
+            logger.info(f"Found {len(self.search_occurrences)} occurrence(s) in UI")
         else:
-            logger.info(f"'{search_text}' not found in logs")
+            logger.info(f"'{search_text}' not found in visible logs")
             self.current_occurrence_index = -1
             self._update_match_counter()
-            QMessageBox.information(self._get_active_window(), "Not Found", f"Text '{search_text}' not found in logs")
+            
+            # Smart tip: Only suggest loading older logs if the button is actually visible
+            tip_msg = ""
+            if self.load_older_bar.isVisible():
+                tip_msg = "\n\nTip: Use 'Load Older Logs' to search older logs."
+            
+            QMessageBox.information(
+                self._get_active_window(), 
+                "Not Found in Visible Logs", 
+                f"Text '{search_text}' not found in currently visible logs.{tip_msg}"
+            )
+    
+    def _search_all_logs(self, search_text: str):
+        """
+        Search ALL logs including disk buffer (slower but complete).
+        
+        Shows progress bar and loads matching sections into UI.
+        """
+        try:
+            if not self._disk_log_path or not self._disk_log_path.exists():
+                self._search_ui_logs(search_text)
+                return
+            
+            logger.info(f"Searching ALL logs ({self._disk_log_lines_count:,} lines) for: '{search_text}'")
+            
+            # Show progress dialog
+            from PySide6.QtWidgets import QProgressDialog
+            progress = QProgressDialog(
+                f"Searching all logs for '{search_text}'...", 
+                "Cancel", 
+                0, 
+                self._disk_log_lines_count, 
+                self._get_active_window()
+            )
+            progress.setWindowModality(Qt.WindowModality.WindowModal)
+            progress.setMinimumDuration(500)
+            
+            # Search disk file line by line
+            first_match_line = -1
+            total_matches = 0
+            search_lower = search_text.lower()
+            
+            with open(self._disk_log_path, 'r', encoding='utf-8') as f:
+                for line_num, line in enumerate(f):
+                    if progress.wasCanceled():
+                        logger.info("Search cancelled by user")
+                        progress.close()
+                        return
+                    
+                    # Case-insensitive search
+                    if search_lower in line.lower():
+                        total_matches += 1
+                        if first_match_line < 0:
+                            first_match_line = line_num
+                    
+                    # Update progress every 1000 lines
+                    if line_num % 1000 == 0:
+                        progress.setValue(line_num)
+            
+            progress.close()
+            
+            if total_matches > 0:
+                # Found matches! Load the section with first match
+                logger.info(f"Found {total_matches} matches, first at line {first_match_line + 1}")
+                
+                # Determine range to load (centered around first match)
+                load_start = max(0, first_match_line - 5000)  # 5k lines before
+                load_end = min(self._disk_log_lines_count, first_match_line + 45000)  # 45k lines after (total 50k)
+                
+                # Load this range into UI
+                logger.info(f"Loading lines {load_start + 1:,} to {load_end:,} to show match")
+                
+                # Read the range from disk
+                text_to_load = self._read_log_lines_from_disk(load_start, load_end)
+                
+                # Replace UI content with this range
+                self.log_output.clear()
+                self.log_output.setPlainText(text_to_load)
+                
+                # Update tracking
+                self._ui_start_line = load_start
+                self._ui_end_line = load_end
+                self._ui_lines_count = self.log_output.document().blockCount()
+                
+                # Update load older bar
+                self._update_load_older_bar()
+                
+                # Now search in the loaded content
+                self.current_search_term = search_text
+                self.search_occurrences = self._find_all_occurrences(search_text)
+                
+                if self.search_occurrences:
+                    self._jump_to_occurrence(0)
+                    
+                    # Show success message
+                    QMessageBox.information(
+                        self._get_active_window(),
+                        "Search Complete",
+                        f"Found {total_matches:,} total matches in all logs.\n\n"
+                        f"Loaded lines {load_start + 1:,} to {load_end:,} showing first match.\n"
+                        f"Use Next/Previous to navigate."
+                    )
+                
+            else:
+                # No matches found anywhere
+                logger.info(f"'{search_text}' not found in any logs")
+                QMessageBox.information(
+                    self._get_active_window(),
+                    "Not Found",
+                    f"Text '{search_text}' not found in any of the {self._disk_log_lines_count:,} log lines."
+                )
+                
+        except Exception as e:
+            logger.error(f"Error searching all logs: {e}", exc_info=True)
+            QMessageBox.critical(
+                self._get_active_window(),
+                "Search Error",
+                f"Error searching logs: {str(e)}"
+            )
     
     def find_next(self):
         """Find the next occurrence of the search text (case-insensitive)."""
@@ -1340,6 +1541,18 @@ class MainWindow(QWidget):
         import html
         import re
         
+        # Check if we're in limited mode
+        limit = AppConfig.get_log_buffer_limit()
+        warning_html = ""
+        if limit > 0:
+            warning_html = f"""
+            <div class="warning">
+                <strong>⚠️ Limited Mode Active:</strong> Only the most recent {limit} lines were saved. 
+                Older logs were discarded to save memory. 
+                Switch to 'Unlimited' mode in Settings to capture full history.
+            </div>
+            """
+        
         # HTML template with styling
         html_template = """<!DOCTYPE html>
 <html>
@@ -1379,6 +1592,14 @@ class MainWindow(QWidget):
             white-space: pre-wrap;
             line-height: 1.4;
         }}
+        .warning {{
+            background-color: #3e2723;
+            border-left: 5px solid #ff5722;
+            padding: 10px;
+            margin-bottom: 20px;
+            border-radius: 4px;
+            color: #ffcc80;
+        }}
         /* Only ERROR and WARN are highlighted (not INFO/DEBUG) */
         .error {{ color: #ff6b6b; font-weight: bold; }}
         .warn {{ color: #ffa726; font-weight: bold; }}
@@ -1390,6 +1611,7 @@ class MainWindow(QWidget):
         <p>Generated: {timestamp}</p>
         <p>Total Lines: {total_lines} | Errors: {errors} | Warnings: {warnings}</p>
     </div>
+    {warning_html}
     <div class="logs">{highlighted_logs}</div>
 </body>
 </html>"""
@@ -1513,7 +1735,7 @@ class MainWindow(QWidget):
             "• Memory Warnings (ON)\n"
             "• Custom SSH Folder (Default)\n\n"
             "Your SSH connection settings will NOT be affected.\n"
-            "The app will restart after reset."
+            "A restart will be required for changes to take effect."
         )
         confirm.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         confirm.setDefaultButton(QMessageBox.StandardButton.No)
@@ -1525,7 +1747,7 @@ class MainWindow(QWidget):
                 logger.info("Resetting all settings to defaults")
                 
                 # Reset all settings to defaults
-                AppConfig.set_theme("dark")
+                # AppConfig.set_theme("dark") # Theme is not stored in AppConfig yet
                 AppConfig.set_auto_reconnect(True)
                 AppConfig.set_log_buffer_limit(0)  # Unlimited
                 AppConfig.set_show_memory_warnings(True)
@@ -1533,17 +1755,25 @@ class MainWindow(QWidget):
                 
                 logger.info("Settings reset to defaults successfully")
                 
-                # Success message
-                QMessageBox.information(
-                    self,
-                    "Settings Reset",
-                    "All settings have been reset to defaults!\n\n"
-                    "Please restart the application for all changes to take effect."
-                )
+                # Success message with restart options
+                restart_box = QMessageBox(self)
+                restart_box.setWindowTitle("Settings Reset")
+                restart_box.setText("All settings have been reset to defaults!")
+                restart_box.setInformativeText("You need to restart the application for all changes to take effect.")
+                restart_box.setIcon(QMessageBox.Icon.Information)
                 
-                # Close the application
-                logger.info("Closing application after settings reset")
-                self.close()
+                restart_now_btn = restart_box.addButton("Restart Now", QMessageBox.ButtonRole.AcceptRole)
+                restart_later_btn = restart_box.addButton("Restart Later", QMessageBox.ButtonRole.RejectRole)
+                restart_box.setDefaultButton(restart_now_btn)
+                
+                restart_box.exec()
+                
+                if restart_box.clickedButton() == restart_now_btn:
+                    # Close the application
+                    logger.info("Closing application after settings reset (user chose Restart Now)")
+                    self.close()
+                else:
+                    logger.info("User chose to restart later")
                 
             except Exception as e:
                 logger.error(f"Error resetting settings: {e}")
@@ -1704,6 +1934,7 @@ class MainWindow(QWidget):
             self.reconnect_attempts = 0
             
             # Create a separate SSH connection for metrics (non-blocking)
+            # ENABLED: Metrics monitoring with separate SSH connection
             try:
                 logger.info("Creating separate SSH connection for metrics monitoring")
                 self.console_output.append("[INFO] Setting up metrics monitoring connection...\n")
@@ -1736,7 +1967,8 @@ class MainWindow(QWidget):
                         self.console_output.append("[OK] Metrics monitoring ready\n")
                 
                 self.metrics_connection_worker.finished.connect(on_metrics_connection_complete)
-                self.metrics_connection_worker.start()
+                # Delay start slightly to allow main connection to stabilize
+                QTimer.singleShot(1000, self.metrics_connection_worker.start)
                 
             except Exception as e:
                 logger.warning(f"Failed to setup metrics connection: {e}")
@@ -1776,11 +2008,23 @@ class MainWindow(QWidget):
         try:
             logger.error(f"Worker error: {error_msg}")
             
+            # Reset refreshing state if applicable
+            self.refresh_btn.setEnabled(self.is_connected)
+            self.refresh_btn.setText("🔄 Refresh All Pods")
+            
             # Check if this is an SSH connection error
             is_ssh_error = any(keyword in error_msg.lower() for keyword in 
                               ['connection', 'ssh', 'timeout', 'broken pipe', 'lost connection'])
             
-            if is_ssh_error and self.auto_reconnect_enabled and self.reconnect_attempts < self.max_reconnect_attempts:
+            if "getaddrinfo failed" in error_msg:
+                QMessageBox.critical(self, "Connection Error", 
+                    "Failed to resolve server address (DNS Error).\n\n"
+                    "Possible causes:\n"
+                    "1. VPN is disconnected\n"
+                    "2. Internet connection issue\n"
+                    "3. Invalid hostname in config\n\n"
+                    "Please check your connection and try again.")
+            elif is_ssh_error and self.auto_reconnect_enabled and self.reconnect_attempts < self.max_reconnect_attempts:
                 # Attempt auto-reconnect
                 self.reconnect_attempts += 1
                 logger.info(f"Auto-reconnect attempt {self.reconnect_attempts}/{self.max_reconnect_attempts}")
@@ -1808,6 +2052,8 @@ class MainWindow(QWidget):
             self.connect_btn.setText("Connect")
             self.fetch_btn.setEnabled(self.is_connected)
             self.fetch_btn.setText("Fetch Pods")
+            self.refresh_btn.setEnabled(self.is_connected)
+            self.refresh_btn.setText("🔄 Refresh All Pods")
         except Exception as e:
             logger.error(f"Error in _on_error handler: {e}", exc_info=True)
     
@@ -1822,7 +2068,7 @@ class MainWindow(QWidget):
         
         # Try to reconnect with the same credentials
         # This will trigger the connect flow again
-        QTimer.singleShot(500, self.connect_to_server)
+        QTimer.singleShot(500, self.handle_connect)
     
     def _append_console(self, text):
         """Append text to console output with crash protection."""
@@ -1936,6 +2182,15 @@ class MainWindow(QWidget):
                 
                 # Set QTextEdit to limit directly (most efficient!)
                 self.log_output.document().setMaximumBlockCount(log_limit)
+                
+                # WARN USER: Limited mode does not save history!
+                self.console_output.append(
+                    f"\n⚠️ WARNING: Limited Mode Active ({log_limit} lines).\n"
+                    "   • Only the most recent {log_limit} lines are kept.\n"
+                    "   • Older logs are DELETED permanently to save RAM.\n"
+                    "   • 'Save Logs' will only save what is currently visible.\n"
+                    "   • To save EVERYTHING, switch to 'Unlimited' in Settings > Advanced.\n"
+                )
                 return
             
             # UNLIMITED MODE: Enable disk buffering
@@ -2006,7 +2261,7 @@ class MainWindow(QWidget):
                     file_size_mb = self._disk_log_path.stat().st_size / 1024 / 1024
                     logger.info(f"✓ Closed disk buffer: {self._disk_log_lines_count:,} lines ({file_size_mb:.1f} MB)")
                 
-            # Keep the file for potential "Save All" feature
+            # Keep the file for potential "Save All" and "Load Older" features
             # Will be cleaned up on app exit or next startup
             
             self._disk_log_file = None
@@ -2014,6 +2269,215 @@ class MainWindow(QWidget):
             
         except Exception as e:
             logger.error(f"Error closing disk buffer: {e}", exc_info=True)
+    
+    def _update_load_older_bar(self):
+        """
+        Update the load older logs bar visibility and text.
+        
+        Shows bar if there are older logs not currently displayed in UI.
+        """
+        try:
+            if not self._disk_buffering_enabled or not self._disk_log_path or not self._disk_log_path.exists():
+                self.load_older_bar.setVisible(False)
+                return
+            
+            # Check if there are older logs not shown
+            if self._ui_start_line > 0:
+                older_lines = self._ui_start_line
+                self.load_older_label.setText(
+                    f"📄 {older_lines:,} older lines available on disk "
+                    f"(Showing lines {self._ui_start_line + 1:,} to {self._ui_end_line:,} of {self._disk_log_lines_count:,})"
+                )
+                self.load_older_bar.setVisible(True)
+                logger.debug(f"Load older bar visible: {older_lines:,} older lines available")
+            else:
+                self.load_older_bar.setVisible(False)
+                
+        except Exception as e:
+            logger.error(f"Error updating load older bar: {e}", exc_info=True)
+            self.load_older_bar.setVisible(False)
+    
+    def _load_older_logs(self):
+        """
+        Load older logs from disk buffer (10k lines at a time).
+        
+        SMART SCROLLING: Loads older logs on demand for perfect UX!
+        """
+        try:
+            if not self._disk_log_path or not self._disk_log_path.exists():
+                QMessageBox.warning(self, "No Older Logs", "No older logs available on disk.")
+                return
+            
+            if self._ui_start_line <= 0:
+                QMessageBox.information(self, "All Loaded", "All logs are already loaded in the UI.")
+                return
+            
+            logger.info(f"Loading older logs: start={self._ui_start_line}, chunk={self._load_more_chunk_size}")
+            
+            # Calculate how many lines to load
+            lines_to_load = min(self._load_more_chunk_size, self._ui_start_line)
+            new_start = self._ui_start_line - lines_to_load
+            
+            # Read the specific range from disk file
+            older_text = self._read_log_lines_from_disk(new_start, self._ui_start_line)
+            
+            if not older_text:
+                QMessageBox.warning(self, "Load Error", "Could not load older logs from disk.")
+                return
+            
+            # Insert at the beginning of the text editor
+            cursor = self.log_output.textCursor()
+            cursor.beginEditBlock()
+            cursor.movePosition(QTextCursor.MoveOperation.Start)
+            cursor.insertText(older_text)
+            cursor.endEditBlock()
+            
+            # Update tracking
+            self._ui_start_line = new_start
+            self._ui_lines_count = self.log_output.document().blockCount()
+            
+            # Trim bottom if UI has too many lines (keep memory under control)
+            if self._ui_lines_count > self._max_ui_lines:
+                lines_to_remove = self._ui_lines_count - self._max_ui_lines
+                cursor.movePosition(QTextCursor.MoveOperation.End)
+                cursor.beginEditBlock()
+                for _ in range(lines_to_remove):
+                    cursor.movePosition(QTextCursor.MoveOperation.Up, QTextCursor.MoveMode.KeepAnchor)
+                    cursor.movePosition(QTextCursor.MoveOperation.StartOfLine, QTextCursor.MoveMode.KeepAnchor)
+                cursor.removeSelectedText()
+                cursor.endEditBlock()
+                
+                self._ui_end_line -= lines_to_remove
+                self._ui_lines_count = self.log_output.document().blockCount()
+                logger.debug(f"Trimmed {lines_to_remove:,} lines from bottom to maintain {self._max_ui_lines:,} line limit")
+            
+            # Update UI
+            self._update_load_older_bar()
+            logger.info(f"✓ Loaded {lines_to_load:,} older lines (now showing {self._ui_start_line + 1:,} to {self._ui_end_line:,})")
+            
+            # Keep scroll position at top (user wanted to see older logs)
+            self.log_output.moveCursor(QTextCursor.MoveOperation.Start)
+            self.log_output.ensureCursorVisible()
+            
+        except Exception as e:
+            logger.error(f"Error loading older logs: {e}", exc_info=True)
+            QMessageBox.critical(self, "Error", f"Failed to load older logs: {str(e)}")
+    
+    def _load_all_logs(self):
+        """
+        Load ALL logs from disk into UI.
+        
+        WARNING: May be slow for huge logs! Shows confirmation for large files.
+        """
+        try:
+            if not self._disk_log_path or not self._disk_log_path.exists():
+                QMessageBox.warning(self, "No Logs", "No logs available on disk.")
+                return
+            
+            total_lines = self._disk_log_lines_count
+            lines_to_load = self._ui_start_line  # Lines not currently shown
+            
+            if lines_to_load <= 0:
+                QMessageBox.information(self, "All Loaded", "All logs are already loaded.")
+                return
+            
+            # Warn for huge logs
+            if total_lines > 100000:
+                file_size_mb = self._disk_log_path.stat().st_size / 1024 / 1024
+                reply = QMessageBox.question(
+                    self,
+                    "Load All Logs?",
+                    f"This will load {total_lines:,} lines ({file_size_mb:.1f} MB) into memory.\n\n"
+                    f"This may take a few seconds and use ~{total_lines * 0.002:.0f} MB of RAM.\n\n"
+                    "Continue?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No
+                )
+                if reply != QMessageBox.StandardButton.Yes:
+                    return
+            
+            logger.info(f"Loading ALL logs: {lines_to_load:,} lines from disk")
+            
+            # Show progress (for large files)
+            from PySide6.QtWidgets import QProgressDialog
+            progress = QProgressDialog("Loading all logs from disk...", "Cancel", 0, lines_to_load, self)
+            progress.setWindowModality(Qt.WindowModality.WindowModal)
+            progress.setMinimumDuration(500)  # Show after 500ms
+            
+            # Read older logs in chunks
+            chunk_size = 50000
+            all_text = []
+            
+            for offset in range(0, lines_to_load, chunk_size):
+                if progress.wasCanceled():
+                    logger.info("Load all cancelled by user")
+                    return
+                
+                end = min(offset + chunk_size, lines_to_load)
+                chunk_text = self._read_log_lines_from_disk(offset, end)
+                if chunk_text:
+                    all_text.append(chunk_text)
+                
+                progress.setValue(end)
+            
+            progress.close()
+            
+            # Combine and insert
+            older_text = "".join(all_text)
+            cursor = self.log_output.textCursor()
+            cursor.beginEditBlock()
+            cursor.movePosition(QTextCursor.MoveOperation.Start)
+            cursor.insertText(older_text)
+            cursor.endEditBlock()
+            
+            # Update tracking
+            self._ui_start_line = 0
+            self._ui_end_line = self._disk_log_lines_count
+            self._ui_lines_count = self.log_output.document().blockCount()
+            
+            # Update UI
+            self._update_load_older_bar()
+            logger.info(f"✓ Loaded ALL {lines_to_load:,} lines (total: {self._ui_lines_count:,} lines in UI)")
+            
+            # Move to top
+            self.log_output.moveCursor(QTextCursor.MoveOperation.Start)
+            self.log_output.ensureCursorVisible()
+            
+            QMessageBox.information(self, "Loaded", f"Successfully loaded all {total_lines:,} lines into UI!")
+            
+        except Exception as e:
+            logger.error(f"Error loading all logs: {e}", exc_info=True)
+            QMessageBox.critical(self, "Error", f"Failed to load all logs: {str(e)}")
+    
+    def _read_log_lines_from_disk(self, start_line: int, end_line: int) -> str:
+        """
+        Read specific line range from disk buffer file.
+        
+        Args:
+            start_line: Starting line number (0-based, inclusive)
+            end_line: Ending line number (0-based, exclusive)
+        
+        Returns:
+            Text content of the specified line range
+        """
+        try:
+            if not self._disk_log_path or not self._disk_log_path.exists():
+                return ""
+            
+            result_lines = []
+            
+            with open(self._disk_log_path, 'r', encoding='utf-8') as f:
+                for line_num, line in enumerate(f):
+                    if line_num >= end_line:
+                        break
+                    if line_num >= start_line:
+                        result_lines.append(line)
+            
+            return "".join(result_lines)
+            
+        except Exception as e:
+            logger.error(f"Error reading lines {start_line}-{end_line} from disk: {e}", exc_info=True)
+            return ""
     
     def _append_log(self, text):
         """
@@ -2127,13 +2591,19 @@ class MainWindow(QWidget):
             # NOTE: Limited mode uses QTextEdit's setMaximumBlockCount (more efficient)
             if self._disk_buffering_enabled:
                 doc = self.log_output.document()
-                if doc.blockCount() > 50000:
-                    logger.info(f"UI at 50k lines, trimming to 40k (keeping newest). Total on disk: {self._disk_log_lines_count:,}")
+                
+                # Update UI end line tracker (what's the last line shown?)
+                self._ui_end_line = self._disk_log_lines_count
+                
+                # Trim if UI has too many lines (Option B: 100k limit for better UX)
+                if doc.blockCount() > 100000:
+                    lines_to_trim = 10000
+                    logger.info(f"UI at 100k lines, trimming {lines_to_trim:,} oldest (keeping newest 90k). Total on disk: {self._disk_log_lines_count:,}")
                     
-                    # Remove oldest 10k lines from UI (keeps newest 40k)
+                    # Remove oldest lines from UI (keeps newest)
                     cursor.movePosition(QTextCursor.MoveOperation.Start)
                     cursor.beginEditBlock()
-                    for _ in range(10000):
+                    for _ in range(lines_to_trim):
                         cursor.select(QTextCursor.SelectionType.BlockUnderCursor)
                         cursor.removeSelectedText()
                         cursor.deleteChar()  # Remove newline
@@ -2141,11 +2611,21 @@ class MainWindow(QWidget):
                     
                     self._ui_lines_count = doc.blockCount()
                     
+                    # Update UI start line tracker (oldest line now shown)
+                    self._ui_start_line += lines_to_trim
+                    
+                    logger.debug(f"UI now shows lines {self._ui_start_line + 1:,} to {self._ui_end_line:,} of {self._disk_log_lines_count:,}")
+                    
+                    # Update "Load Older" bar visibility
+                    self._update_load_older_bar()
+                    
                     # Update label to show disk buffer status
                     if hasattr(self, 'current_pod_label'):
-                        current_text = self.current_pod_label.text()
-                        if "│" not in current_text:  # Only add once
-                            self.current_pod_label.setText(f"{current_text} │ 💾 {self._disk_log_lines_count:,} lines on disk")
+                        current_text = self.current_pod_label.text().split("│")[0].strip()
+                        self.current_pod_label.setText(
+                            f"{current_text} │ 💾 {self._disk_log_lines_count:,} lines total "
+                            f"(showing {self._ui_start_line + 1:,}-{self._ui_end_line:,})"
+                        )
             
             # Memory warning check (every 30 minutes)
             self._check_memory_warning()
@@ -2189,7 +2669,7 @@ class MainWindow(QWidget):
         theme_class = get_theme(theme_name)
         
         # Apply main stylesheet
-        self.setStyleSheet(theme_class.get_main_stylesheet())
+        self.setStyleSheet(theme_class.get_stylesheet())
         
         # Update console and log output colors
         console_style = f"""
@@ -2285,12 +2765,18 @@ class MainWindow(QWidget):
         contact_label.setFont(dev_font)
         layout.addWidget(contact_label)
         
-        email1_label = QLabel('📧 <a href="mailto:harshmeetsingh010@gmail.com">harshmeetsingh010@gmail.com</a>')
+        # Link color based on theme
+        if self.current_theme == "dark":
+            link_color = "#4a9eff"
+        else:
+            link_color = "#0066cc"
+            
+        email1_label = QLabel(f'📧 <a href="mailto:harshmeetsingh010@gmail.com" style="color: {link_color}; text-decoration: none;">harshmeetsingh010@gmail.com</a>')
         email1_label.setOpenExternalLinks(True)
         email1_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
         layout.addWidget(email1_label)
         
-        email2_label = QLabel('📧 <a href="mailto:harshmeet.singh@netcoreunbxd.com">harshmeet.singh@netcoreunbxd.com</a>')
+        email2_label = QLabel(f'📧 <a href="mailto:harshmeet.singh@netcoreunbxd.com" style="color: {link_color}; text-decoration: none;">harshmeet.singh@netcoreunbxd.com</a>')
         email2_label.setOpenExternalLinks(True)
         email2_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
         layout.addWidget(email2_label)
@@ -2318,8 +2804,25 @@ class MainWindow(QWidget):
                     background-color: #2b2b2b;
                     color: #e0e0e0;
                 }
+                QLabel {
+                    color: #e0e0e0;
+                }
                 QLabel a {
                     color: #4a9eff;
+                }
+            """)
+        else:
+            dialog.setStyleSheet("""
+                QDialog {
+                    background-color: #ffffff;
+                    color: #212121;
+                }
+                QLabel {
+                    color: #212121;
+                }
+                QLabel a {
+                    color: #0066cc;
+                    text-decoration: none;
                 }
             """)
         
@@ -3200,7 +3703,7 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
         
         clicked = msg.clickedButton()
         if clicked == save_btn:
-            self.save_current_logs()
+            self.save_logs_to_file()
         elif clicked == settings_btn:
             self._show_advanced_settings_dialog()
         elif clicked == dont_show_btn:
@@ -3248,6 +3751,19 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
         buffer_layout.addWidget(limit_spin)
         
         limited_radio.toggled.connect(limit_spin.setEnabled)
+        
+        # Warning label for limited mode
+        self.warning_label = QLabel(
+            "⚠️ <b>Warning:</b> Older logs will be permanently deleted to save memory.<br>"
+            "Only the most recent lines will be kept."
+        )
+        self.warning_label.setStyleSheet("color: #ff9800; font-size: 9pt; margin-top: 5px;")
+        self.warning_label.setWordWrap(True)
+        self.warning_label.setVisible(current_limit > 0)  # Show if limited is selected
+        buffer_layout.addWidget(self.warning_label)
+        
+        # Connect toggle to warning visibility
+        limited_radio.toggled.connect(self.warning_label.setVisible)
         
         info_label = QLabel(
             "<small>"

@@ -69,6 +69,44 @@ def _get_radio_icon_path():
     return str(icon_path).replace('\\', '/')
 
 
+def _get_arrow_icon_path(direction="up", color="#ffffff"):
+    """Get path to arrow icon, create if doesn't exist."""
+    # Sanitize color for filename
+    color_name = color.replace("#", "")
+    filename = f"arrow_{direction}_{color_name}.png"
+    
+    icon_dir = Path(tempfile.gettempdir()) / "argo_log_viewer_icons"
+    icon_dir.mkdir(exist_ok=True)
+    icon_path = icon_dir / filename
+    
+    if not icon_path.exists():
+        from PySide6.QtGui import QPixmap, QPainter, QColor, QBrush, QPolygon
+        from PySide6.QtCore import Qt, QPoint
+        
+        pixmap = QPixmap(16, 16)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        painter.setBrush(QBrush(QColor(color)))
+        painter.setPen(Qt.PenStyle.NoPen)
+        
+        # Draw arrow
+        if direction == "up":
+            # Triangle pointing up
+            points = [QPoint(8, 5), QPoint(4, 10), QPoint(12, 10)]
+        else: # down
+            # Triangle pointing down
+            points = [QPoint(8, 11), QPoint(4, 6), QPoint(12, 6)]
+            
+        painter.drawPolygon(QPolygon(points))
+        painter.end()
+        pixmap.save(str(icon_path))
+    
+    return str(icon_path).replace('\\', '/')
+
+
 
 class BaseTheme:
     """Base theme class with common properties."""
@@ -106,11 +144,13 @@ class BaseTheme:
     metrics_text = "#ffffff"
     
     @classmethod
-    def get_main_stylesheet(cls) -> str:
+    def get_stylesheet(cls) -> str:
         """Get the main application stylesheet."""
         # Get icon paths
         checkmark_icon = _get_checkbox_icon_path()
         radio_icon = _get_radio_icon_path()
+        up_arrow_icon = _get_arrow_icon_path("up", cls.text_color)
+        down_arrow_icon = _get_arrow_icon_path("down", cls.text_color)
         
         return f"""
             QWidget {{
@@ -328,9 +368,43 @@ class BaseTheme:
                 border: 1px solid {cls.input_border};
                 border-radius: 4px;
                 padding: 5px;
+                padding-right: 25px; /* Make room for buttons */
             }}
             QSpinBox:focus {{
                 border-color: {cls.primary_accent};
+            }}
+            QSpinBox::up-button {{
+                subcontrol-origin: border;
+                subcontrol-position: top right;
+                width: 25px;
+                border-left: 1px solid {cls.input_border};
+                border-bottom: 1px solid {cls.input_border};
+                background: {cls.button_background};
+                border-top-right-radius: 4px;
+            }}
+            QSpinBox::down-button {{
+                subcontrol-origin: border;
+                subcontrol-position: bottom right;
+                width: 25px;
+                border-left: 1px solid {cls.input_border};
+                background: {cls.button_background};
+                border-bottom-right-radius: 4px;
+            }}
+            QSpinBox::up-button:hover, QSpinBox::down-button:hover {{
+                background-color: {cls.button_hover};
+            }}
+            QSpinBox::up-button:pressed, QSpinBox::down-button:pressed {{
+                background-color: {cls.primary_accent};
+            }}
+            QSpinBox::up-arrow {{
+                image: url({up_arrow_icon});
+                width: 10px;
+                height: 10px;
+            }}
+            QSpinBox::down-arrow {{
+                image: url({down_arrow_icon});
+                width: 10px;
+                height: 10px;
             }}
         """
     
