@@ -840,8 +840,8 @@ class MainWindow(QWidget):
         # Stop any running log stream
         self.stop_log_stream()
         
-        # Stop any running metrics monitoring
-        self.stop_metrics_monitoring()
+        # Stop any running metrics monitoring (and hide UI)
+        self.stop_metrics_monitoring(hide_ui=True)
         
         self.console_output.append("\n=== Disconnecting ===\n")
         
@@ -870,27 +870,36 @@ class MainWindow(QWidget):
         if not self.is_connected:
             QMessageBox.warning(self, "Not Connected", "Please connect first before refreshing pods")
             return
+            
+        # FORCE STOP EVERYTHING - CRITICAL FOR STABILITY
+        # 1. Stop metrics monitoring (and wait, hide UI)
+        self.stop_metrics_monitoring(hide_ui=True)
         
-        # Stop any active log streaming first to free up the SSH shell
-        if self.worker and self.worker.isRunning():
-            logger.info("Stopping active log stream before refreshing pods")
-            self.console_output.append("\n[INFO] Stopping active operations before refresh...\n")
+        # 2. Stop log stream (and wait)
+        self.stop_log_stream()
+        
+        # 3. Stop any existing worker thread manually to prevent "QThread Destroyed" crash
+        if hasattr(self, 'worker') and self.worker and self.worker.isRunning():
+            logger.info("Force stopping existing worker thread")
             self.worker.stop()
-            self.worker.wait(2000)  # Wait up to 2 seconds for graceful stop
-            self.stop_logs_btn.setEnabled(False)
+            if not self.worker.wait(3000):  # Wait up to 3 seconds
+                logger.warning("Worker thread did not stop gracefully, forcing termination")
+                self.worker.terminate() # Last resort
+                self.worker.wait()
         
         self.pod_list.clear()
         self.console_output.append("\n=== Refreshing pod list ===\n")
+        
+        # Disable buttons mutually
+        self.refresh_btn.setEnabled(False)
+        self.refresh_btn.setText("Refreshing...")
+        self.fetch_btn.setEnabled(False)
         
         # Create worker to list all pods (similar to connect action)
         self.worker = ArgoWorker(action="list_all_pods", ssh_manager=self.ssh_manager)
         self.worker.output.connect(self._append_console)
         self.worker.pods.connect(self._on_pods_received)
         self.worker.error.connect(self._on_error)
-        
-        self.refresh_btn.setEnabled(False)
-        self.refresh_btn.setText("Refreshing...")
-        self.fetch_btn.setEnabled(False)  # Disable search while refreshing
         
         logger.info("Starting refresh worker")
         self.worker.start()
@@ -906,17 +915,34 @@ class MainWindow(QWidget):
             self.refresh_pods()
             return
         
-        # Stop any active log streaming first to free up the SSH shell
-        if self.worker and self.worker.isRunning():
-            logger.info("Stopping active log stream before fetching pods")
-            self.console_output.append("\n[INFO] Stopping active operations before search...\n")
+        if not self.is_connected:
+            QMessageBox.warning(self, "Not Connected", "Please connect first before searching pods")
+            return
+
+        # FORCE STOP EVERYTHING - CRITICAL FOR STABILITY
+        # 1. Stop metrics monitoring (and wait, hide UI)
+        self.stop_metrics_monitoring(hide_ui=True)
+        
+        # 2. Stop log stream (and wait)
+        self.stop_log_stream()
+        
+        # 3. Stop any existing worker thread manually to prevent "QThread Destroyed" crash
+        if hasattr(self, 'worker') and self.worker and self.worker.isRunning():
+            logger.info("Force stopping existing worker thread")
             self.worker.stop()
-            self.worker.wait(2000)  # Wait up to 2 seconds for graceful stop
-            self.stop_logs_btn.setEnabled(False)
+            if not self.worker.wait(3000):  # Wait up to 3 seconds
+                logger.warning("Worker thread did not stop gracefully, forcing termination")
+                self.worker.terminate() # Last resort
+                self.worker.wait()
         
         logger.info(f"Fetching pods with keyword: '{keyword}'")
         self.pod_list.clear()
         self.console_output.append(f"\n=== Fetching pods matching '{keyword}' ===\n")
+        
+        # Disable buttons mutually
+        self.fetch_btn.setEnabled(False)
+        self.fetch_btn.setText("Fetching...")
+        self.refresh_btn.setEnabled(False)
         
         # Create and start worker
         self.worker = ArgoWorker(
@@ -927,10 +953,6 @@ class MainWindow(QWidget):
         self.worker.output.connect(self._append_console)
         self.worker.pods.connect(self._on_pods_received)
         self.worker.error.connect(self._on_error)
-        
-        self.fetch_btn.setEnabled(False)
-        self.fetch_btn.setText("Fetching...")
-        self.refresh_btn.setEnabled(False)  # Disable refresh while searching
         
         logger.info("Starting list_pods worker")
         self.worker.start()
@@ -1009,10 +1031,13 @@ class MainWindow(QWidget):
             logger.info("Stopping log stream")
             self.console_output.append("\n[INFO] Stopping log stream...\n")
             self.worker.stop()
-            self.worker.wait(2000)  # Wait up to 2 seconds
+            if not self.worker.wait(2000):  # Wait up to 2 seconds
+                logger.warning("Log stream worker did not stop gracefully, forcing termination")
+                self.worker.terminate()
+                self.worker.wait()
             
-        # Stop metrics monitoring
-        self.stop_metrics_monitoring()
+        # Stop metrics monitoring (and hide UI)
+        self.stop_metrics_monitoring(hide_ui=True)
         
         # Close disk buffer (keeps file for potential save)
         self._close_disk_buffer()
@@ -1040,21 +1065,36 @@ class MainWindow(QWidget):
         if not self.current_pod_for_metrics:
             logger.warning("No pod selected for metrics monitoring")
             return
+            
+        # Check if refresh or search is in progress
+        if not self.refresh_btn.isEnabled() or not self.fetch_btn.isEnabled():
+            logger.info("Skipping metrics start because refresh/search is in progress")
+            return
         
         # Check if we have a metrics SSH connection
         if not self.ssh_manager_metrics or not self.ssh_manager_metrics.is_connected():
-            logger.warning("Metrics SSH connection not available")
-            self.metrics_label.setText("│ ⚠️ Metrics unavailable")
-            self.metrics_label.setToolTip("Metrics connection not established")
+            reason = "Not initialized" if not self.ssh_manager_metrics else "Disconnected"
+            logger.warning(f"Metrics SSH connection not available ({reason})")
+            self.console_output.append(f"[WARNING] Metrics connection unavailable ({reason}). Attempting to reconnect...\n")
+            
+            self.metrics_label.setText("│ 🔄 Reconnecting metrics...")
+            self.metrics_label.setToolTip("Re-establishing metrics connection...")
+            self.metrics_label.setVisible(True)
+            self.retry_metrics_btn.setVisible(False)
+            
+            # Attempt to reconnect metrics SSH
+            self._connect_metrics_ssh()
             return
         
         try:
             logger.info(f"Starting metrics monitoring for pod: {self.current_pod_for_metrics}")
             
-            # Stop any active metrics monitoring
-            self.stop_metrics_monitoring()
+            # Stop any active metrics monitoring (and hide UI to prevent flicker)
+            self.stop_metrics_monitoring(hide_ui=True)
             
             # Show fetching state
+            self.metrics_label.setVisible(True)
+            self.retry_metrics_btn.setVisible(True)
             self.metrics_label.setText("│ 📊 Fetching...")
             
             # Create and start worker for metrics (using SEPARATE SSH connection)
@@ -1076,13 +1116,36 @@ class MainWindow(QWidget):
             self.metrics_label.setText("│ ⚠️ Metrics unavailable")
             self.is_monitoring_metrics = False
     
-    def stop_metrics_monitoring(self):
-        """Stop the current metrics monitoring."""
+    def stop_metrics_monitoring(self, hide_ui=False):
+        """
+        Stop the current metrics monitoring.
+        
+        Args:
+            hide_ui: If True, hide the metrics UI elements completely.
+        """
         if hasattr(self, 'metrics_worker') and self.metrics_worker and self.metrics_worker.isRunning():
             logger.info("Stopping metrics monitoring")
             self.metrics_worker.stop()
-            self.metrics_worker.wait(2000)  # Wait up to 2 seconds
+            if not self.metrics_worker.wait(2000):  # Wait up to 2 seconds
+                logger.warning("Metrics worker did not stop gracefully, forcing termination")
+                self.metrics_worker.terminate()
+                self.metrics_worker.wait()
             self.is_monitoring_metrics = False
+            
+        # Reset UI
+        try:
+            if hide_ui:
+                self.metrics_label.setVisible(False)
+                self.retry_metrics_btn.setVisible(False)
+                self.metrics_label.clear()
+                # Clear fullscreen metrics if exists
+                if hasattr(self, 'fullscreen_metrics_label'):
+                    self.fullscreen_metrics_label.clear()
+            else:
+                self.metrics_label.setText("│ 📊 Click Refresh to load metrics")
+                self.retry_metrics_btn.setVisible(True)
+        except:
+            pass
     
     def retry_metrics(self):
         """Manually start or retry fetching metrics for the current pod."""
@@ -1092,10 +1155,11 @@ class MainWindow(QWidget):
             return
         
         logger.info(f"Manual metrics start/retry requested for pod: {self.current_pod_for_metrics}")
-        self.metrics_label.setText("│ 🔄 Starting metrics...")
         
         # Stop existing metrics monitoring and restart
         self.stop_metrics_monitoring()
+        
+        self.metrics_label.setText("│ 🔄 Starting metrics...")
         
         # Restart metrics monitoring
         from PySide6.QtCore import QTimer
@@ -1121,6 +1185,7 @@ class MainWindow(QWidget):
             lines = metrics_text.strip().split('\n')
             cpu_usage = "N/A"
             memory_usage = "N/A"
+            found_match = False
             
             for line in lines[:50]:  # PERFORMANCE: Limit parsing to first 50 lines
                 line = line.strip()
@@ -1140,8 +1205,14 @@ class MainWindow(QWidget):
                         cpu_usage = parts[1] if len(parts) > 1 else "N/A"
                         memory_usage = parts[2] if len(parts) > 2 else "N/A"
                         logger.debug(f"Parsed metrics - CPU: {cpu_usage}, Memory: {memory_usage}")
+                        found_match = True
                         break
             
+            # Only update UI if we found metrics for the CURRENT pod
+            if not found_match:
+                # If we didn't find a match, it might be old data for a previous pod. Ignore it.
+                return
+
             # Ultra-compact display format
             metrics_text = f"│ 📊 CPU: {cpu_usage} • Memory: {memory_usage}"
             self.metrics_label.setText(metrics_text)
@@ -1918,6 +1989,56 @@ class MainWindow(QWidget):
             self.is_fullscreen = False
             self.fullscreen_btn.setText("⛶ Fullscreen")
     
+    def _connect_metrics_ssh(self):
+        """Establish a separate SSH connection for metrics."""
+        try:
+            # Check if already connecting
+            if hasattr(self, 'metrics_connection_worker') and self.metrics_connection_worker and self.metrics_connection_worker.isRunning():
+                logger.info("Metrics connection already in progress")
+                return
+
+            logger.info("Creating separate SSH connection for metrics monitoring")
+            self.console_output.append("[INFO] Setting up metrics monitoring connection...\n")
+            
+            from PySide6.QtCore import QThread
+            
+            class MetricsConnectionWorker(QThread):
+                def __init__(self, parent):
+                    super().__init__(parent)
+                    self.ssh_manager = None
+                    self.error_msg = None
+                
+                def run(self):
+                    try:
+                        from app.ssh.connection_manager import SSHConnectionManager
+                        self.ssh_manager = SSHConnectionManager()
+                        self.ssh_manager.connect()
+                    except Exception as e:
+                        self.error_msg = str(e)
+            
+            self.metrics_connection_worker = MetricsConnectionWorker(self)
+            
+            def on_metrics_connection_complete():
+                if self.metrics_connection_worker.error_msg:
+                    logger.warning(f"Failed to create metrics connection: {self.metrics_connection_worker.error_msg}")
+                    self.console_output.append(f"[WARNING] Metrics connection failed: {self.metrics_connection_worker.error_msg}\n")
+                    self.metrics_label.setText("│ ⚠️ Metrics unavailable")
+                elif self.metrics_connection_worker.ssh_manager:
+                    self.ssh_manager_metrics = self.metrics_connection_worker.ssh_manager
+                    logger.info("Metrics SSH connection established")
+                    self.console_output.append("[OK] Metrics monitoring ready\n")
+                    
+                    # If user was waiting for metrics (reconnecting), show success
+                    if "Reconnecting" in self.metrics_label.text():
+                        self.metrics_label.setText("│ 📊 Click Refresh to load metrics")
+                        self.retry_metrics_btn.setVisible(True)
+            
+            self.metrics_connection_worker.finished.connect(on_metrics_connection_complete)
+            self.metrics_connection_worker.start()
+            
+        except Exception as e:
+            logger.warning(f"Failed to setup metrics connection: {e}")
+
     # -------------------------
     # Signal Handlers
     # -------------------------
@@ -1936,40 +2057,8 @@ class MainWindow(QWidget):
             # Create a separate SSH connection for metrics (non-blocking)
             # ENABLED: Metrics monitoring with separate SSH connection
             try:
-                logger.info("Creating separate SSH connection for metrics monitoring")
-                self.console_output.append("[INFO] Setting up metrics monitoring connection...\n")
-                
-                from PySide6.QtCore import QThread
-                
-                class MetricsConnectionWorker(QThread):
-                    def __init__(self, parent):
-                        super().__init__(parent)
-                        self.ssh_manager = None
-                        self.error_msg = None
-                    
-                    def run(self):
-                        try:
-                            from app.ssh.connection_manager import SSHConnectionManager
-                            self.ssh_manager = SSHConnectionManager()
-                            self.ssh_manager.connect()
-                        except Exception as e:
-                            self.error_msg = str(e)
-                
-                self.metrics_connection_worker = MetricsConnectionWorker(self)
-                
-                def on_metrics_connection_complete():
-                    if self.metrics_connection_worker.error_msg:
-                        logger.warning(f"Failed to create metrics connection: {self.metrics_connection_worker.error_msg}")
-                        self.console_output.append("[WARNING] Metrics connection failed - metrics will be unavailable\n")
-                    elif self.metrics_connection_worker.ssh_manager:
-                        self.ssh_manager_metrics = self.metrics_connection_worker.ssh_manager
-                        logger.info("Metrics SSH connection established")
-                        self.console_output.append("[OK] Metrics monitoring ready\n")
-                
-                self.metrics_connection_worker.finished.connect(on_metrics_connection_complete)
                 # Delay start slightly to allow main connection to stabilize
-                QTimer.singleShot(1000, self.metrics_connection_worker.start)
-                
+                QTimer.singleShot(1000, self._connect_metrics_ssh)
             except Exception as e:
                 logger.warning(f"Failed to setup metrics connection: {e}")
             

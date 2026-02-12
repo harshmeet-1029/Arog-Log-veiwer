@@ -95,16 +95,22 @@ class ArgoWorker(QThread):
     
     def _parse_pod_names(self, kubectl_output: str) -> list:
         """
-        Parse pod names from kubectl get pods output.
+        Parse pod names from kubectl get pods output with STRICT validation.
         
         Args:
             kubectl_output: Raw output from kubectl get pods
             
         Returns:
-            List of pod names
+            List of valid pod names
         """
+        import re
         pod_names = []
         lines = kubectl_output.strip().split('\n')
+        
+        # Kubernetes pod name regex: lowercase alphanumeric and hyphens, start/end with alphanumeric
+        # Max length is 253, but we'll be generous.
+        # We also want to avoid capturing log lines or headers.
+        pod_name_pattern = re.compile(r'^[a-z0-9]([-a-z0-9]*[a-z0-9])?$')
         
         for line in lines:
             line = line.strip()
@@ -118,15 +124,24 @@ class ArgoWorker(QThread):
             # Skip command echoes and prompts
             if line.startswith('kubectl') or line.endswith('$') or line.endswith('#'):
                 continue
+                
+            # Skip obvious log lines (timestamps, levels)
+            if 'time="' in line or 'level=' in line or 'msg="' in line:
+                continue
             
             # Pod name is the first column
             parts = line.split()
             if parts and len(parts) >= 1:
                 pod_name = parts[0]
-                # Basic validation - should look like a pod name
-                if pod_name and not pod_name.startswith('[') and '-' in pod_name:
+                
+                # Strict validation
+                if pod_name_pattern.match(pod_name) and not '=' in pod_name:
                     pod_names.append(pod_name)
                     logger.debug(f"Parsed pod: {pod_name}")
+                else:
+                    # Only log if it looks suspicious but not empty
+                    if len(pod_name) > 0 and not pod_name.startswith('['):
+                        logger.debug(f"Ignored invalid pod name candidate: {pod_name}")
         
         return pod_names
     
@@ -210,10 +225,14 @@ class ArgoWorker(QThread):
             k8s = KubernetesOperations(self.ssh_manager)
             pods_output = k8s.list_all_pods()
             
-            # Display output in console
-            self.output.emit(pods_output)
-            if not pods_output.strip().endswith('\n'):
-                self.output.emit('\n')
+            # Display output in console ONLY if it's short (prevent UI freeze)
+            line_count = len(pods_output.split('\n'))
+            if line_count < 20:
+                self.output.emit(pods_output)
+                if not pods_output.strip().endswith('\n'):
+                    self.output.emit('\n')
+            else:
+                self.output.emit(f"[INFO] Raw output hidden ({line_count} lines) to prevent console flood.\n")
             
             # Parse and emit pod names
             pod_names = self._parse_pod_names(pods_output)
@@ -339,6 +358,18 @@ class ArgoWorker(QThread):
                     failed_attempts += 1
                     logger.warning(f"Metrics fetch failed (attempt {failed_attempts}/{max_failed_attempts}): {error_msg}")
                     
+                    # Check if pod not found (special case: retry 3 times only)
+                    if "Pod not found" in error_msg:
+                        if failed_attempts >= 3:
+                            logger.warning(f"Pod not found after 3 attempts, stopping metrics: {self.pod}")
+                            self.error.emit(f"Pod not found: {self.pod}")
+                            break
+                        else:
+                            logger.debug(f"Pod not found, retrying... (attempt {failed_attempts}/3)")
+                            # Wait a bit before retry (e.g. 2s)
+                            time.sleep(2)
+                            continue
+
                     # Check if metrics-server is definitely not available (hard errors)
                     is_hard_error = (
                         "Metrics server not available" in error_msg or

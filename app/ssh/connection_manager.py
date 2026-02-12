@@ -211,6 +211,18 @@ class SSHConnectionManager:
         if not self.connected:
             raise RuntimeError("Not connected. Call connect() first.")
         
+        # Drain any pending output from previous commands (CRITICAL for clean output)
+        if self.shell and self.shell.recv_ready():
+            try:
+                dropped = 0
+                while self.shell.recv_ready():
+                    data = self.shell.recv(4096)
+                    dropped += len(data)
+                if dropped > 0:
+                    logger.warning(f"Drained {dropped} bytes of stale shell output before executing '{command}'")
+            except Exception as e:
+                logger.warning(f"Error draining shell: {e}")
+        
         logger.info(f"Executing command: {command}")
         self._send_command(command)
         
