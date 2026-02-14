@@ -447,6 +447,69 @@ jobs:
           Professional desktop application for viewing Argo Workflow logs via SSH.
           
           ---
+          
+          ## 💡 Why This Tool Exists
+          
+          Working with Argo Workflows on Kubernetes clusters often requires navigating through multiple SSH jump servers and executing complex kubectl commands. **Argo Log Viewer eliminates that friction.**
+          
+          ### 🎯 Problems It Solves
+          
+          #### 1. **Eliminates Complex SSH Access Chain** 🔗
+          
+          **Before:** To view logs in real-time, you need to manually run these commands every time:
+          ```
+          Local Machine 
+            → ssh usejump 
+              → ssh 10.0.34.231 
+                → sudo su - solutions01-prod-us-east-1-eks
+                  → kubectl logs commands
+          ```
+          
+          **Now:** Click "Connect" once. Done. ✅
+          
+          ---
+          
+          #### 2. **Real-Time Log Streaming** ⚡
+          
+          **Problem:** `solutions-argo-workflow` web UI shows "Waiting for data..." indefinitely.
+          
+          **Solution:** Instant real-time log streaming with `kubectl logs -f`.
+          
+          ---
+          
+          #### 3. **Easy Log Saving** 💾
+          
+          **Problem:** Saving logs requires navigating to S3 buckets manually - time-consuming and cumbersome.
+          
+          **Solution:** One-click log saving while viewing them in real-time.
+          
+          ---
+          
+          #### 4. **Built-in Search & Line Copy** 🔍
+          
+          **Problem:** Finding info requires manual scrolling or complex grep through SSH. Web UI doesn't allow copying single lines.
+          
+          **Solution:** Integrated search + copy any line or selection easily.
+          
+          ---
+          
+          #### 5. **Real-Time Resource Monitoring** 📊
+          
+          **Problem:** Checking CPU/memory requires logging into SSH jump server and running 3-4 kubectl commands.
+          
+          **Solution:** View CPU & memory usage directly in the UI - auto-refreshes every 3 seconds.
+          
+          ---
+          
+          #### 6. **Professional Desktop Experience** 🖥️
+          
+          - Modern UI with dark/light themes
+          - Non-blocking operations - never freezes
+          - Full transparency with console output
+          - One-click OTA updates
+          
+          ---
+          
           ## 🎥 THE INSTRUCTION VIDEO IS HERE:
 
           [https://youtu.be/5N-RW_yY-Q0](https://youtu.be/5N-RW_yY-Q0)
