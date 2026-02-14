@@ -2,6 +2,44 @@
 
 A production-grade Python desktop GUI application for viewing Argo Workflow logs through SSH.
 
+## Why We Created This Tool
+
+Working with Argo Workflows on Kubernetes clusters often requires navigating through multiple SSH jump servers and executing complex kubectl commands just to view logs. This tool was created to eliminate that friction and provide a seamless log viewing experience.
+
+### The Problem
+
+When working with Argo Workflows deployed on Kubernetes clusters behind SSH jump servers (like `solutions-argo-workflow`), developers face several pain points:
+
+1. **Complex SSH Access Chain**: To view logs in real-time, you need to manually execute a tedious series of commands:
+   ```
+   Local Machine → ssh usejump → ssh 10.0.34.231 → sudo su - solutions01-prod-us-east-1-eks → kubectl commands
+   ```
+   This multi-step process is time-consuming and error-prone.
+
+2. **"Waiting for Data" Delays**: The web-based Argo Workflow UI often displays "Waiting for data..." messages indefinitely, preventing you from seeing logs in real-time.
+
+3. **Difficult Log Persistence**: Saving logs requires navigating to S3 buckets manually, which is cumbersome and time-consuming.
+
+4. **Limited Search Capabilities**: Finding specific information in logs requires manual scrolling or complex grep commands through SSH.
+
+5. **No Resource Monitoring**: Checking CPU and memory usage of pods requires logging into the SSH jump server and running multiple kubectl commands, making performance troubleshooting difficult.
+
+6. **Line-Level Copy Restrictions**: The web UI doesn't allow copying individual log lines, forcing you to copy entire log blocks or use SSH for specific lines.
+
+### The Solution
+
+Argo Log Viewer automates the entire SSH chain and provides a modern desktop interface that:
+
+- **Eliminates SSH Complexity**: Automatically handles the entire SSH jump server chain for you - no more manual logins
+- **Real-Time Log Streaming**: View logs instantly with kubectl logs -f, no more "Waiting for data" messages
+- **Easy Log Saving**: Save logs with one click while viewing them in real-time
+- **Built-in Search**: Find what you need quickly with integrated search functionality
+- **Real-Time Resource Monitoring**: View CPU and memory usage directly in the UI without SSH commands
+- **Line-Level Copy**: Copy any single line or selection from the logs
+- **Professional UI**: Modern, responsive interface with themes and proper layout
+
+**Bottom Line**: This tool transforms a 5-command SSH workflow into a single click, while providing features that aren't available in the web UI.
+
 ## Features
 
 - **Stateful SSH Connection Chain**: Maintains proper SSH session through jump host → internal server → sudo context
