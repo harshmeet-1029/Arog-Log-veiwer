@@ -1579,7 +1579,15 @@ class MainWindow(QWidget):
             log_source = "disk"  # Will read from disk
         else:
             logger.info("Saving logs from UI (recent lines only)")
-            log_content = self.log_output.toPlainText()
+            # FIX: Extract text block by block to avoid Qt's paragraph spacing
+            # Qt's toPlainText() adds extra newlines between text blocks
+            document = self.log_output.document()
+            blocks = []
+            block = document.begin()
+            while block.isValid():
+                blocks.append(block.text())
+                block = block.next()
+            log_content = "\n".join(blocks)
             log_source = "ui"
             
             if not log_content:
@@ -1833,8 +1841,19 @@ class MainWindow(QWidget):
     def _copy_all_logs(self):
         """Copy all logs to clipboard."""
         from PySide6.QtWidgets import QApplication
+        
+        # FIX: Extract text block by block to avoid Qt's paragraph spacing
+        # Qt's toPlainText() adds extra newlines between text blocks
+        document = self.log_output.document()
+        blocks = []
+        block = document.begin()
+        while block.isValid():
+            blocks.append(block.text())
+            block = block.next()
+        log_content = "\n".join(blocks)
+        
         clipboard = QApplication.clipboard()
-        clipboard.setText(self.log_output.toPlainText())
+        clipboard.setText(log_content)
         
         logger.info("Copied all logs to clipboard")
     
