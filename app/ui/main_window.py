@@ -70,6 +70,7 @@ class MainWindow(QWidget):
         # Stream monitoring state
         self._stream_start_time = None  # Track when log streaming started
         self._last_memory_warning_time = 0  # Track last memory warning
+        self._is_streaming_logs = False  # Track if actively streaming logs (CRASH PROTECTION)
         
         # Update state
         self.pending_update: Opt_Type[UpdateInfo] = None
@@ -875,12 +876,22 @@ class MainWindow(QWidget):
         # 1. Stop metrics monitoring (and wait, hide UI)
         self.stop_metrics_monitoring(hide_ui=True)
         
-        # 2. Stop log stream (and wait)
+        # 2. Stop log stream (and wait) - this now also disconnects signals
         self.stop_log_stream()
         
         # 3. Stop any existing worker thread manually to prevent "QThread Destroyed" crash
         if hasattr(self, 'worker') and self.worker and self.worker.isRunning():
             logger.info("Force stopping existing worker thread")
+            
+            # CRITICAL: Disconnect all signals first to prevent late callbacks
+            try:
+                self.worker.output.disconnect()
+                self.worker.pods.disconnect()
+                self.worker.error.disconnect()
+                logger.debug("Disconnected all worker signals before stopping")
+            except Exception as e:
+                logger.debug(f"Could not disconnect worker signals: {e}")
+            
             self.worker.stop()
             if not self.worker.wait(3000):  # Wait up to 3 seconds
                 logger.warning("Worker thread did not stop gracefully, forcing termination")
@@ -923,12 +934,22 @@ class MainWindow(QWidget):
         # 1. Stop metrics monitoring (and wait, hide UI)
         self.stop_metrics_monitoring(hide_ui=True)
         
-        # 2. Stop log stream (and wait)
+        # 2. Stop log stream (and wait) - this now also disconnects signals
         self.stop_log_stream()
         
         # 3. Stop any existing worker thread manually to prevent "QThread Destroyed" crash
         if hasattr(self, 'worker') and self.worker and self.worker.isRunning():
             logger.info("Force stopping existing worker thread")
+            
+            # CRITICAL: Disconnect all signals first to prevent late callbacks
+            try:
+                self.worker.output.disconnect()
+                self.worker.pods.disconnect()
+                self.worker.error.disconnect()
+                logger.debug("Disconnected all worker signals before stopping")
+            except Exception as e:
+                logger.debug(f"Could not disconnect worker signals: {e}")
+            
             self.worker.stop()
             if not self.worker.wait(3000):  # Wait up to 3 seconds
                 logger.warning("Worker thread did not stop gracefully, forcing termination")
@@ -1018,6 +1039,9 @@ class MainWindow(QWidget):
         import time
         self._stream_start_time = time.time()
         
+        # Mark that we're actively streaming (CRASH PROTECTION flag)
+        self._is_streaming_logs = True
+        
         # Auto-start metrics monitoring REMOVED for stability
         # User initiates it manually via refresh button
     
@@ -1026,10 +1050,40 @@ class MainWindow(QWidget):
         Stop the current log stream but keep logs visible.
         
         NOTE: Closes disk buffer but keeps file for potential save operation.
+        CRITICAL: Properly disconnects signals and cleans up timers to prevent crashes.
         """
+        # CRITICAL: Clear streaming flag IMMEDIATELY to stop any pending operations
+        self._is_streaming_logs = False
+        
+        # CRITICAL: Stop and clear batch timer FIRST to prevent queued updates
+        if self._batch_timer and self._batch_timer.isActive():
+            logger.debug("Stopping batch timer")
+            self._batch_timer.stop()
+        
+        # CRITICAL: Clear any pending batches to prevent late UI updates
+        if self._log_append_batch:
+            logger.debug(f"Clearing {len(self._log_append_batch)} pending log batches")
+            self._log_append_batch.clear()
+        
+        # CRITICAL: Disconnect worker signals BEFORE stopping to prevent race conditions
         if self.worker and self.worker.isRunning():
-            logger.info("Stopping log stream")
+            logger.info("Stopping log stream and disconnecting signals")
             self.console_output.append("\n[INFO] Stopping log stream...\n")
+            
+            try:
+                # Disconnect all signals to prevent any further updates
+                self.worker.output.disconnect()
+                logger.debug("Disconnected worker.output signal")
+            except Exception as e:
+                logger.debug(f"Could not disconnect worker.output: {e}")
+            
+            try:
+                self.worker.error.disconnect()
+                logger.debug("Disconnected worker.error signal")
+            except Exception as e:
+                logger.debug(f"Could not disconnect worker.error: {e}")
+            
+            # Now stop the worker
             self.worker.stop()
             if not self.worker.wait(2000):  # Wait up to 2 seconds
                 logger.warning("Log stream worker did not stop gracefully, forcing termination")
@@ -1051,7 +1105,7 @@ class MainWindow(QWidget):
         self.metrics_label.clear()
         self.retry_metrics_btn.setVisible(False)
         
-        # Reset stream tracking
+        # Reset stream tracking (flag already cleared at start)
         self._stream_start_time = None
         
         # Keep logs visible, keep pod label, keep fullscreen/save buttons
@@ -1125,6 +1179,15 @@ class MainWindow(QWidget):
         """
         if hasattr(self, 'metrics_worker') and self.metrics_worker and self.metrics_worker.isRunning():
             logger.info("Stopping metrics monitoring")
+            
+            # CRITICAL: Disconnect all signals first to prevent late callbacks
+            try:
+                self.metrics_worker.metrics.disconnect()
+                self.metrics_worker.error.disconnect()
+                logger.debug("Disconnected metrics worker signals")
+            except Exception as e:
+                logger.debug(f"Could not disconnect metrics worker signals: {e}")
+            
             self.metrics_worker.stop()
             if not self.metrics_worker.wait(2000):  # Wait up to 2 seconds
                 logger.warning("Metrics worker did not stop gracefully, forcing termination")
@@ -2574,6 +2637,16 @@ class MainWindow(QWidget):
         Uses deque for efficient memory management and batches updates for performance.
         """
         try:
+            # CRITICAL: Double-check streaming state to prevent late arrivals after stop
+            if not self._is_streaming_logs:
+                logger.debug("Ignoring log append - not actively streaming")
+                return
+            
+            # CRITICAL: Check if worker is still active to prevent late arrivals after stop
+            if not self.worker or not self.worker.isRunning():
+                logger.debug("Ignoring log append - worker not active")
+                return
+            
             # Add to deque for efficient line management
             for line in text.splitlines(keepends=True):
                 if line.strip():  # Only add non-empty lines
@@ -2611,9 +2684,23 @@ class MainWindow(QWidget):
         - Writes ALL logs to disk (unlimited storage)
         - Keeps only recent 50k lines in UI (low memory)
         - User gets unlimited logs without RAM constraints!
+        
+        CRASH PROTECTION: Checks if streaming is still active before updating UI.
         """
         try:
             if not self._log_append_batch:
+                return
+            
+            # CRITICAL: Triple-check if we should still be processing logs
+            # This prevents crashes when stop is called while timer is queued
+            if not self._is_streaming_logs:
+                logger.debug("Aborting flush - not actively streaming")
+                self._log_append_batch.clear()
+                return
+            
+            if not self.worker or not self.worker.isRunning():
+                logger.debug("Aborting flush - worker not active")
+                self._log_append_batch.clear()
                 return
             
             # Stop the timer if active
