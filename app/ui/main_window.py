@@ -614,6 +614,23 @@ class MainWindow(QWidget):
         self.retry_metrics_btn.setVisible(False)
         self.retry_metrics_btn.clicked.connect(self.retry_metrics)
         header_layout.addWidget(self.retry_metrics_btn)
+        # Stop metrics button (visible only while metrics are fetching)
+        self.stop_metrics_btn = QPushButton("⏹")
+        self.stop_metrics_btn.setToolTip("Stop metrics")
+        self.stop_metrics_btn.setFixedSize(32, 28)
+        self.stop_metrics_btn.setStyleSheet("""
+            QPushButton {
+                font-size: 16px;
+                padding: 0px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: rgba(255, 255, 255, 0.1);
+            }
+        """)
+        self.stop_metrics_btn.setVisible(False)
+        self.stop_metrics_btn.clicked.connect(self._stop_metrics_clicked)
+        header_layout.addWidget(self.stop_metrics_btn)
         
         header_layout.addStretch()
         
@@ -777,6 +794,7 @@ class MainWindow(QWidget):
         self.metrics_label.setVisible(False)
         self.metrics_label.clear()
         self.retry_metrics_btn.setVisible(False)
+        self.stop_metrics_btn.setVisible(False)
         self.status_label.setText("● Disconnected")
         self.status_label.setStyleSheet("color: red; font-weight: bold; font-size: 11pt;")
     
@@ -1100,10 +1118,11 @@ class MainWindow(QWidget):
         self.stop_logs_btn.setEnabled(False)
         self.current_pod_for_metrics = None
         
-        # Hide metrics and retry button
+        # Hide metrics and retry/stop buttons
         self.metrics_label.setVisible(False)
         self.metrics_label.clear()
         self.retry_metrics_btn.setVisible(False)
+        self.stop_metrics_btn.setVisible(False)
         
         # Reset stream tracking (flag already cleared at start)
         self._stream_start_time = None
@@ -1135,6 +1154,7 @@ class MainWindow(QWidget):
             self.metrics_label.setToolTip("Re-establishing metrics connection...")
             self.metrics_label.setVisible(True)
             self.retry_metrics_btn.setVisible(False)
+            self.stop_metrics_btn.setVisible(False)
             
             # Attempt to reconnect metrics SSH
             self._connect_metrics_ssh()
@@ -1159,8 +1179,10 @@ class MainWindow(QWidget):
             )
             self.metrics_worker.metrics.connect(self._update_metrics_display)
             self.metrics_worker.error.connect(self._on_metrics_error)
+            self.metrics_worker.finished.connect(self._on_metrics_worker_finished)
             
             self.is_monitoring_metrics = True
+            self.stop_metrics_btn.setVisible(True)
             
             logger.info("Starting metrics worker (on separate SSH connection)")
             self.metrics_worker.start()
@@ -1169,6 +1191,7 @@ class MainWindow(QWidget):
             logger.error(f"Failed to start metrics monitoring (logs unaffected): {e}", exc_info=True)
             self.metrics_label.setText("│ ⚠️ Metrics unavailable")
             self.is_monitoring_metrics = False
+            self.stop_metrics_btn.setVisible(False)
     
     def stop_metrics_monitoring(self, hide_ui=False):
         """
@@ -1184,6 +1207,7 @@ class MainWindow(QWidget):
             try:
                 self.metrics_worker.metrics.disconnect()
                 self.metrics_worker.error.disconnect()
+                self.metrics_worker.finished.disconnect(self._on_metrics_worker_finished)
                 logger.debug("Disconnected metrics worker signals")
             except Exception as e:
                 logger.debug(f"Could not disconnect metrics worker signals: {e}")
@@ -1200,6 +1224,7 @@ class MainWindow(QWidget):
             if hide_ui:
                 self.metrics_label.setVisible(False)
                 self.retry_metrics_btn.setVisible(False)
+                self.stop_metrics_btn.setVisible(False)
                 self.metrics_label.clear()
                 # Clear fullscreen metrics if exists
                 if hasattr(self, 'fullscreen_metrics_label'):
@@ -1207,8 +1232,21 @@ class MainWindow(QWidget):
             else:
                 self.metrics_label.setText("│ 📊 Click Refresh to load metrics")
                 self.retry_metrics_btn.setVisible(True)
+                self.stop_metrics_btn.setVisible(False)
         except:
             pass
+    
+    def _on_metrics_worker_finished(self):
+        """Sync UI when metrics worker thread exits (stop button, state). Ignores stale worker."""
+        if self.sender() is not getattr(self, "metrics_worker", None):
+            return
+        self.is_monitoring_metrics = False
+        self.stop_metrics_btn.setVisible(False)
+    
+    def _stop_metrics_clicked(self):
+        """Stop fetching metrics; last value stays visible until next refresh."""
+        logger.info("User requested to stop metrics")
+        self.stop_metrics_monitoring(hide_ui=False)
     
     def retry_metrics(self):
         """Manually start or retry fetching metrics for the current pod."""
@@ -1235,6 +1273,9 @@ class MainWindow(QWidget):
         PERFORMANCE: Throttle UI updates to max once per 2 seconds to prevent freezing.
         """
         try:
+            # Ignore late/stray callbacks after user stopped metrics (avoids work and races)
+            if not self.is_monitoring_metrics:
+                return
             import time
             
             # Throttle metrics UI updates to max once per 2 seconds
@@ -1298,6 +1339,9 @@ class MainWindow(QWidget):
         NOTE: Metrics errors do NOT affect log streaming.
         """
         try:
+            # Ignore late/stray callbacks after user stopped metrics
+            if not self.is_monitoring_metrics:
+                return
             logger.warning(f"Metrics worker error (logs unaffected): {error_msg}")
             
             # User-friendly error message
@@ -1309,6 +1353,7 @@ class MainWindow(QWidget):
                 self.metrics_label.setToolTip(f"Error: {error_msg}. Logs are working normally.")
             
             self.is_monitoring_metrics = False
+            self.stop_metrics_btn.setVisible(False)
             
         except Exception as e:
             logger.error(f"Error in _on_metrics_error: {e}", exc_info=True)
