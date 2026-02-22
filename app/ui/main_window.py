@@ -1912,21 +1912,20 @@ class MainWindow(QWidget):
                 restart_box = QMessageBox(self)
                 restart_box.setWindowTitle("Settings Reset")
                 restart_box.setText("All settings have been reset to defaults!")
-                restart_box.setInformativeText("You need to restart the application for all changes to take effect.")
+                restart_box.setInformativeText("Close the app now to apply changes, or keep working and they will apply the next time you open the app.")
                 restart_box.setIcon(QMessageBox.Icon.Information)
                 
-                restart_now_btn = restart_box.addButton("Restart Now", QMessageBox.ButtonRole.AcceptRole)
-                restart_later_btn = restart_box.addButton("Restart Later", QMessageBox.ButtonRole.RejectRole)
+                restart_now_btn = restart_box.addButton("Close now", QMessageBox.ButtonRole.AcceptRole)
+                restart_later_btn = restart_box.addButton("Keep working", QMessageBox.ButtonRole.RejectRole)
                 restart_box.setDefaultButton(restart_now_btn)
                 
                 restart_box.exec()
                 
                 if restart_box.clickedButton() == restart_now_btn:
-                    # Close the application
-                    logger.info("Closing application after settings reset (user chose Restart Now)")
+                    logger.info("Closing application after settings reset (user chose Close now)")
                     self.close()
                 else:
-                    logger.info("User chose to restart later")
+                    logger.info("User chose to keep working; changes apply on next launch")
                 
             except Exception as e:
                 logger.error(f"Error resetting settings: {e}")
