@@ -4206,15 +4206,8 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
         
         if result['success']:
             if result['action'] == 'launched':
-                # Installer launched - show confirmation and exit
-                reply = QMessageBox.information(
-                    self,
-                    "Update Ready",
-                    result['message'],
-                    QMessageBox.StandardButton.Ok
-                )
-                
-                # Exit application
+                # Installer launched - exit immediately (no dialog!)
+                logger.info("Installer launched, exiting app now")
                 from PySide6.QtWidgets import QApplication
                 QApplication.quit()
             

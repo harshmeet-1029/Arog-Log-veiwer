@@ -377,15 +377,23 @@ class InstallerLauncher:
         if package_type == 'installer':
             try:
                 logger.info(f"Launching Windows installer: {file_path}")
-                # Launch installer (it will run after this app closes)
-                subprocess.Popen([file_path], shell=False)
+                
+                # Create a batch script that waits for this app to close, then launches installer
+                batch_script = os.path.join(os.path.dirname(file_path), 'launch_installer.bat')
+                with open(batch_script, 'w') as f:
+                    f.write(f'''@echo off
+timeout /t 2 /nobreak >nul
+start "" "{file_path}"
+del "%~f0"
+''')
+                
+                # Launch the batch script (will wait 2 seconds, then launch installer)
+                subprocess.Popen([batch_script], shell=False, creationflags=subprocess.CREATE_NO_WINDOW)
                 
                 return {
                     'success': True,
                     'action': 'launched',
-                    'message': '✓ Installer launched successfully!\n\n'
-                              'The installer will open when you close this app.\n\n'
-                              'Click OK to close Argo Log Viewer and complete the update.',
+                    'message': 'Installer will launch in 2 seconds...',
                     'needs_manual': False
                 }
                 
