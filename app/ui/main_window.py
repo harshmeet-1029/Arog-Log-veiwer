@@ -3727,9 +3727,10 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
             
             def run(self):
                 try:
-                    # Refresh metadata BEFORE checking for updates
-                    from app.metadata_detector import MetadataDetector
-                    MetadataDetector.detect()  # This will update the cache
+                    # Clear cache and force fresh detection BEFORE checking for updates
+                    from app.config import AppConfig
+                    AppConfig.clear_installation_metadata()
+                    AppConfig.get_installation_metadata()  # This will re-detect
                     
                     self.update_info = UpdateChecker.check_for_updates()
                     UpdateChecker.mark_update_checked()
@@ -3747,28 +3748,32 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
         # Get current metadata
         metadata = AppConfig.get_installation_metadata()
         
-        # Get app version from pyproject.toml or metadata
-        try:
-            import tomllib
-            with open('pyproject.toml', 'rb') as f:
-                pyproject = tomllib.load(f)
-                app_version = pyproject['project']['version']
-        except:
-            app_version = metadata.get('version', 'Unknown')
+        # Get app version from build_metadata or metadata
+        app_version = metadata.get('version', 'Unknown')
+        if app_version == 'Unknown':
+            try:
+                from app import build_metadata
+                app_version = build_metadata.VERSION
+            except:
+                try:
+                    import tomllib
+                    with open('pyproject.toml', 'rb') as f:
+                        pyproject = tomllib.load(f)
+                        app_version = pyproject['project']['version']
+                except:
+                    app_version = 'Unknown'
         
         # Build info message
         platform = metadata.get('platform', 'Unknown')
         package_type = metadata.get('package_type', 'Unknown')
         architecture = metadata.get('architecture', 'Unknown')
-        source = metadata.get('source', 'Unknown')
         
         message = (
             f"<b>Current Installation Details:</b><br><br>"
             f"<b>App Version:</b> {app_version}<br>"
             f"<b>Platform:</b> {platform}<br>"
             f"<b>Package Type:</b> {package_type}<br>"
-            f"<b>Architecture:</b> {architecture}<br>"
-            f"<b>Detection Source:</b> {source}<br><br>"
+            f"<b>Architecture:</b> {architecture}<br><br>"
             f"<i>If this looks incorrect, click 'Refresh Detection' to re-detect.</i>"
         )
         
@@ -3794,53 +3799,24 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
         """Force re-detection of installation metadata."""
         logger.info("Refreshing installation metadata")
         
-        # Clear cached metadata
-        config_path = AppConfig.get_config_file_path()
-        try:
-            import json
-            with open(config_path, 'r') as f:
-                config_data = json.load(f)
-            
-            # Remove installation_metadata if present
-            if 'installation_metadata' in config_data:
-                del config_data['installation_metadata']
-                
-                with open(config_path, 'w') as f:
-                    json.dump(config_data, f, indent=2)
-                
-                logger.info("Cleared cached installation metadata")
-        except Exception as e:
-            logger.error(f"Failed to clear cached metadata: {e}")
+        # Use the built-in clear method
+        AppConfig.clear_installation_metadata()
         
         # Force re-detection
-        from app.metadata_detector import MetadataDetector
-        new_metadata = MetadataDetector.detect()
-        
-        # Save to config
-        try:
-            with open(config_path, 'r') as f:
-                config_data = json.load(f)
-            
-            config_data['installation_metadata'] = new_metadata
-            
-            with open(config_path, 'w') as f:
-                json.dump(config_data, f, indent=2)
-            
-            logger.info(f"Re-detected and saved metadata: {new_metadata}")
-        except Exception as e:
-            logger.error(f"Failed to save new metadata: {e}")
+        new_metadata = AppConfig.get_installation_metadata()
+        logger.info(f"Re-detected metadata: {new_metadata}")
         
         # Show new info
         from PySide6.QtWidgets import QMessageBox
         
         # Get app version
-        try:
-            import tomllib
-            with open('pyproject.toml', 'rb') as f:
-                pyproject = tomllib.load(f)
-                app_version = pyproject['project']['version']
-        except:
-            app_version = 'Unknown'
+        app_version = new_metadata.get('version', 'Unknown')
+        if app_version == 'Unknown':
+            try:
+                from app import build_metadata
+                app_version = build_metadata.VERSION
+            except:
+                app_version = 'Unknown'
         
         platform = new_metadata.get('platform', 'Unknown')
         package_type = new_metadata.get('package_type', 'Unknown')

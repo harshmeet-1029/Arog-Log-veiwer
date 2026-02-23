@@ -445,7 +445,9 @@ class AppConfig:
             metadata = {
                 'platform': build_metadata.PLATFORM,
                 'package_type': build_metadata.PACKAGE_TYPE,
-                'architecture': build_metadata.ARCHITECTURE
+                'architecture': build_metadata.ARCHITECTURE,
+                'version': build_metadata.VERSION,
+                'source': 'build_metadata'
             }
             logger.info(f"Loaded metadata from build_metadata.py: {metadata}")
             
@@ -463,6 +465,7 @@ class AppConfig:
         # Fall back to runtime detection
         from app.metadata_detector import MetadataDetector
         metadata = MetadataDetector.detect()
+        metadata['source'] = 'runtime_detection'  # Mark as runtime detected
         logger.info(f"Detected installation metadata at runtime: {metadata}")
         
         # Cache it
