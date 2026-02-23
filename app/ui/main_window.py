@@ -424,6 +424,11 @@ class MainWindow(QWidget):
         check_updates_action.triggered.connect(self._check_for_updates_manual)
         settings_menu.addAction(check_updates_action)
         
+        install_info_action = QAction("Show Installation Info", self)
+        install_info_action.setStatusTip("View installation type and metadata")
+        install_info_action.triggered.connect(self._show_installation_info)
+        settings_menu.addAction(install_info_action)
+        
         settings_menu.addSeparator()
         
         reset_settings_action = QAction("⚠️ Reset to Defaults...", self)
@@ -3719,6 +3724,109 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
                 super().__init__(parent)
                 self.update_info = None
                 self.error = None
+    
+    def _show_installation_info(self):
+        """Show current installation metadata and allow refreshing."""
+        logger.info("Showing installation info")
+        
+        # Get current metadata
+        metadata = AppConfig.get_installation_metadata()
+        
+        # Build info message
+        platform = metadata.get('platform', 'Unknown')
+        package_type = metadata.get('package_type', 'Unknown')
+        architecture = metadata.get('architecture', 'Unknown')
+        version = metadata.get('version', 'Unknown')
+        source = metadata.get('source', 'Unknown')
+        
+        message = (
+            f"<b>Current Installation Details:</b><br><br>"
+            f"<b>Platform:</b> {platform}<br>"
+            f"<b>Package Type:</b> {package_type}<br>"
+            f"<b>Architecture:</b> {architecture}<br>"
+            f"<b>Version:</b> {version}<br>"
+            f"<b>Detection Source:</b> {source}<br><br>"
+            f"<i>If this looks incorrect, click 'Refresh Detection' to re-detect.</i>"
+        )
+        
+        from PySide6.QtWidgets import QMessageBox, QPushButton
+        
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("Installation Information")
+        msg_box.setTextFormat(Qt.RichText)
+        msg_box.setText(message)
+        msg_box.setIcon(QMessageBox.Information)
+        
+        # Add custom buttons
+        refresh_btn = msg_box.addButton("Refresh Detection", QMessageBox.ActionRole)
+        close_btn = msg_box.addButton("Close", QMessageBox.RejectRole)
+        
+        msg_box.exec()
+        
+        # Check which button was clicked
+        if msg_box.clickedButton() == refresh_btn:
+            self._refresh_installation_metadata()
+    
+    def _refresh_installation_metadata(self):
+        """Force re-detection of installation metadata."""
+        logger.info("Refreshing installation metadata")
+        
+        # Clear cached metadata
+        config_path = AppConfig.get_config_path()
+        try:
+            import json
+            with open(config_path, 'r') as f:
+                config_data = json.load(f)
+            
+            # Remove installation_metadata if present
+            if 'installation_metadata' in config_data:
+                del config_data['installation_metadata']
+                
+                with open(config_path, 'w') as f:
+                    json.dump(config_data, f, indent=2)
+                
+                logger.info("Cleared cached installation metadata")
+        except Exception as e:
+            logger.error(f"Failed to clear cached metadata: {e}")
+        
+        # Force re-detection
+        from app.metadata_detector import MetadataDetector
+        new_metadata = MetadataDetector.detect()
+        
+        # Save to config
+        try:
+            with open(config_path, 'r') as f:
+                config_data = json.load(f)
+            
+            config_data['installation_metadata'] = new_metadata
+            
+            with open(config_path, 'w') as f:
+                json.dump(config_data, f, indent=2)
+            
+            logger.info(f"Re-detected and saved metadata: {new_metadata}")
+        except Exception as e:
+            logger.error(f"Failed to save new metadata: {e}")
+        
+        # Show new info
+        from PySide6.QtWidgets import QMessageBox
+        
+        platform = new_metadata.get('platform', 'Unknown')
+        package_type = new_metadata.get('package_type', 'Unknown')
+        architecture = new_metadata.get('architecture', 'Unknown')
+        
+        message = (
+            f"<b>Re-detected Installation:</b><br><br>"
+            f"<b>Platform:</b> {platform}<br>"
+            f"<b>Package Type:</b> {package_type}<br>"
+            f"<b>Architecture:</b> {architecture}<br><br>"
+            f"<i>Metadata refreshed successfully!</i>"
+        )
+        
+        QMessageBox.information(
+            self,
+            "Metadata Refreshed",
+            message
+        )
             
             def run(self):
                 try:

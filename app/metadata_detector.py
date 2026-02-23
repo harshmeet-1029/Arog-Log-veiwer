@@ -125,10 +125,21 @@ class MetadataDetector:
             'installer' or 'portable'
         """
         try:
-            # Check if installed via Windows installer (typically in Program Files)
+            # FOOLPROOF METHOD: Check the executable name!
             executable_path = sys.executable if getattr(sys, 'frozen', False) else __file__
+            executable_name = os.path.basename(executable_path)
             
-            # Check for common installer locations
+            # If executable name contains "Installer", it's an installer build
+            if 'Installer' in executable_name:
+                logger.debug(f"Detected installer from executable name: {executable_name}")
+                return 'installer'
+            
+            # If executable name contains "Portable", it's a portable build
+            if 'Portable' in executable_name:
+                logger.debug(f"Detected portable from executable name: {executable_name}")
+                return 'portable'
+            
+            # Fallback: Check if installed via Windows installer (typically in Program Files)
             program_files = os.environ.get('PROGRAMFILES', 'C:\\Program Files')
             program_files_x86 = os.environ.get('PROGRAMFILES(X86)', 'C:\\Program Files (x86)')
             local_app_data = os.environ.get('LOCALAPPDATA', '')
@@ -136,34 +147,10 @@ class MetadataDetector:
             if (program_files in executable_path or 
                 program_files_x86 in executable_path or
                 (local_app_data and local_app_data in executable_path)):
-                logger.debug("Detected Windows installer installation")
+                logger.debug("Detected Windows installer installation (by path)")
                 return 'installer'
             
-            # Check Windows registry for installation (use the AppId GUID)
-            try:
-                import winreg
-                # Try HKEY_LOCAL_MACHINE first (for admin installs)
-                try:
-                    key_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{A7B8C9D0-E1F2-4A5B-8C9D-0E1F2A3B4C5D}_is1"
-                    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path, 0, winreg.KEY_READ):
-                        logger.debug("Found HKLM registry entry - installer installation")
-                        return 'installer'
-                except OSError:
-                    pass
-                
-                # Try HKEY_CURRENT_USER (for user-only installs)
-                try:
-                    key_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{A7B8C9D0-E1F2-4A5B-8C9D-0E1F2A3B4C5D}_is1"
-                    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_READ):
-                        logger.debug("Found HKCU registry entry - installer installation")
-                        return 'installer'
-                except OSError:
-                    pass
-                    
-            except ImportError:
-                pass
-            
-            logger.debug("Detected Windows portable installation")
+            logger.debug("Defaulting to portable for Windows")
             return 'portable'
             
         except Exception as e:
@@ -179,9 +166,22 @@ class MetadataDetector:
             'dmg' or 'zip'
         """
         try:
-            # Check if running from /Applications (typical for DMG installs)
+            # FOOLPROOF METHOD: Check the executable name!
             if getattr(sys, 'frozen', False):
                 executable_path = sys.executable
+                executable_name = os.path.basename(executable_path)
+                
+                # If executable name contains "Installer", it's a DMG installation
+                if 'Installer' in executable_name:
+                    logger.debug(f"Detected DMG from executable name: {executable_name}")
+                    return 'dmg'
+                
+                # If executable name contains "Portable", it's a ZIP extraction
+                if 'Portable' in executable_name:
+                    logger.debug(f"Detected ZIP from executable name: {executable_name}")
+                    return 'zip'
+                
+                # Fallback: Check path
                 bundle_path = os.path.dirname(os.path.dirname(executable_path))  # Go up from MacOS/
                 
                 if '/Applications/' in bundle_path:
@@ -189,7 +189,6 @@ class MetadataDetector:
                     return 'dmg'
                 elif bundle_path.endswith('.app'):
                     # It's a .app bundle but not in /Applications
-                    # Could be ZIP extract or DMG opened elsewhere
                     logger.debug("Detected macOS app bundle outside /Applications (likely ZIP)")
                     return 'zip'
             
@@ -210,30 +209,27 @@ class MetadataDetector:
             'deb' or 'portable'
         """
         try:
-            # Check if installed via DEB package
+            # FOOLPROOF METHOD: Check the executable name!
             executable_path = sys.executable if getattr(sys, 'frozen', False) else __file__
+            executable_name = os.path.basename(executable_path)
             
-            # DEB packages typically install to /usr/local/bin or /usr/bin
-            if '/usr/local/bin/' in executable_path or '/usr/bin/' in executable_path:
-                logger.debug("Detected Linux DEB installation")
+            # If executable name contains "Installer", it's a DEB installation
+            if 'Installer' in executable_name:
+                logger.debug(f"Detected DEB from executable name: {executable_name}")
                 return 'deb'
             
-            # Check dpkg database
-            try:
-                import subprocess
-                result = subprocess.run(
-                    ['dpkg', '-l', 'argologviewer'],
-                    capture_output=True,
-                    text=True,
-                    timeout=5
-                )
-                if result.returncode == 0 and 'argologviewer' in result.stdout:
-                    logger.debug("Found dpkg entry - DEB installation")
-                    return 'deb'
-            except (FileNotFoundError, subprocess.TimeoutExpired):
-                pass
+            # If executable name contains "Portable", it's a portable build
+            if 'Portable' in executable_name:
+                logger.debug(f"Detected portable from executable name: {executable_name}")
+                return 'portable'
             
-            logger.debug("Detected Linux portable installation")
+            # Fallback: Check if installed via DEB package
+            # DEB packages typically install to /usr/local/bin or /usr/bin
+            if '/usr/local/bin/' in executable_path or '/usr/bin/' in executable_path:
+                logger.debug("Detected Linux DEB installation (by path)")
+                return 'deb'
+            
+            logger.debug("Defaulting to portable for Linux")
             return 'portable'
             
         except Exception as e:
