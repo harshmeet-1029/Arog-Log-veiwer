@@ -22,6 +22,34 @@ from PySide6.QtCore import QObject, Signal, QThread
 logger = logging.getLogger(__name__)
 
 
+def get_downloads_folder() -> str:
+    """
+    Get the user's Downloads folder path (cross-platform).
+    
+    Returns:
+        Path to Downloads folder. Falls back to temp dir if not found.
+    """
+    try:
+        if sys.platform == 'win32':
+            folder = os.environ.get('USERPROFILE', '')
+            if folder:
+                downloads = os.path.join(folder, 'Downloads')
+                if os.path.isdir(downloads):
+                    return downloads
+        else:
+            # macOS and Linux
+            downloads = os.path.expanduser('~/Downloads')
+            if os.path.isdir(downloads):
+                return downloads
+            # Linux XDG
+            xdg = os.environ.get('XDG_DOWNLOAD_DIR')
+            if xdg and os.path.isdir(xdg):
+                return xdg
+    except Exception as e:
+        logger.warning(f"Could not get Downloads folder: {e}")
+    return tempfile.gettempdir()
+
+
 class UpdateDownloader(QObject):
     """Downloads update packages with progress tracking."""
     
@@ -30,7 +58,7 @@ class UpdateDownloader(QObject):
     completed = Signal(str)  # downloaded file path
     error = Signal(str)  # error message
     
-    def __init__(self, url: str, file_name: str, file_size: int, parent=None):
+    def __init__(self, url: str, file_name: str, file_size: int, download_dir: Optional[str] = None, parent=None):
         """
         Initialize update downloader.
         
@@ -38,12 +66,15 @@ class UpdateDownloader(QObject):
             url: URL to download from
             file_name: Name of the file
             file_size: Expected file size in bytes
+            download_dir: Where to save the file. None = temp folder (for installers).
+                          Pass get_downloads_folder() for portable so user keeps the file.
             parent: Parent QObject
         """
         super().__init__(parent)
         self.url = url
         self.file_name = file_name
         self.file_size = file_size
+        self.download_dir = download_dir  # None = use temp
         self.cancelled = False
         self.dest_path = None
         
@@ -59,14 +90,18 @@ class UpdateDownloader(QObject):
         Emits progress, completed, or error signals.
         """
         try:
-            # Check disk space
-            temp_dir = tempfile.gettempdir()
-            if not self._check_disk_space(temp_dir, self.file_size):
+            # Portable → Downloads folder so user can keep the file.
+            # Installer/DMG/DEB → temp folder (we run it and don't need to keep it).
+            save_dir = self.download_dir if self.download_dir else tempfile.gettempdir()
+            if not os.path.isdir(save_dir):
+                os.makedirs(save_dir, exist_ok=True)
+            
+            if not self._check_disk_space(save_dir, self.file_size):
                 self.error.emit(f"Insufficient disk space. Need {self.file_size / (1024*1024):.1f} MB")
                 return
             
             # Create destination path
-            self.dest_path = os.path.join(temp_dir, self.file_name)
+            self.dest_path = os.path.join(save_dir, self.file_name)
             logger.info(f"Downloading {self.url} to {self.dest_path}")
             
             # Download with progress
@@ -263,9 +298,9 @@ class UpdateDownloaderThread(QThread):
     completed = Signal(str)
     error = Signal(str)
     
-    def __init__(self, url: str, file_name: str, file_size: int, parent=None):
+    def __init__(self, url: str, file_name: str, file_size: int, download_dir: Optional[str] = None, parent=None):
         super().__init__(parent)
-        self.downloader = UpdateDownloader(url, file_name, file_size)
+        self.downloader = UpdateDownloader(url, file_name, file_size, download_dir=download_dir)
         
         # Connect signals
         self.downloader.progress.connect(self.progress.emit)

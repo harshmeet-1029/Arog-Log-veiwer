@@ -101,6 +101,20 @@ jobs:
         EOF
         echo "✅ Build metadata updated for Windows Installer"
     
+    - name: Build Windows executable for Installer (second build with installer metadata)
+      run: |
+        pyinstaller --name="ArgoLogViewer" `
+          --onefile `
+          --windowed `
+          --add-data="app;app" `
+          --hidden-import=PySide6 `
+          --hidden-import=paramiko `
+          --hidden-import=cryptography `
+          --icon=app/icon.ico `
+          --clean `
+          app/main.py
+        echo "✅ Second build complete (installer metadata baked in)"
+    
     - name: Build Windows Installer
       run: |
         & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer_windows.iss

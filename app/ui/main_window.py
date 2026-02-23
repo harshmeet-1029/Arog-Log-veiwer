@@ -3910,7 +3910,14 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
     def _show_download_progress_dialog(self, update_info: UpdateInfo):
         """Show download progress dialog and start download."""
         from PySide6.QtWidgets import QProgressDialog
-        from app.update_downloader import UpdateDownloaderThread
+        from app.update_downloader import UpdateDownloaderThread, get_downloads_folder
+        
+        # Portable builds → save to Downloads so user can keep the file.
+        # Installer/DMG/DEB → save to temp (we launch it and don't need to keep it).
+        metadata = AppConfig.get_installation_metadata()
+        package_type = (metadata.get('package_type') or '').lower()
+        is_portable = package_type in ('portable', 'zip')
+        download_dir = get_downloads_folder() if is_portable else None
         
         # Create progress dialog
         progress_dialog = QProgressDialog(
@@ -3930,7 +3937,8 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
         self.download_thread = UpdateDownloaderThread(
             update_info.asset_url,
             update_info.file_name,
-            update_info.file_size
+            update_info.file_size,
+            download_dir=download_dir
         )
         
         # Connect signals
