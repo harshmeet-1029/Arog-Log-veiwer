@@ -3724,6 +3724,17 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
                 super().__init__(parent)
                 self.update_info = None
                 self.error = None
+            
+            def run(self):
+                try:
+                    self.update_info = UpdateChecker.check_for_updates()
+                    UpdateChecker.mark_update_checked()
+                except Exception as e:
+                    self.error = str(e)
+        
+        self.manual_update_thread = UpdateCheckThread(self)
+        self.manual_update_thread.finished.connect(self._on_manual_update_check_complete)
+        self.manual_update_thread.start()
     
     def _show_installation_info(self):
         """Show current installation metadata and allow refreshing."""
@@ -3827,17 +3838,6 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
             "Metadata Refreshed",
             message
         )
-            
-            def run(self):
-                try:
-                    self.update_info = UpdateChecker.check_for_updates()
-                    UpdateChecker.mark_update_checked()
-                except Exception as e:
-                    self.error = str(e)
-        
-        self.manual_update_thread = UpdateCheckThread(self)
-        self.manual_update_thread.finished.connect(self._on_manual_update_check_complete)
-        self.manual_update_thread.start()
     
     def _on_manual_update_check_complete(self):
         """Handle completion of manual update check."""
