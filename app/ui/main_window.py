@@ -3912,12 +3912,12 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
         from PySide6.QtWidgets import QProgressDialog
         from app.update_downloader import UpdateDownloaderThread, get_downloads_folder
         
-        # Portable builds → save to Downloads so user can keep the file.
-        # Installer/DMG/DEB → save to temp (we launch it and don't need to keep it).
+        # Portable builds + DEB → save to Downloads so user can keep the file.
+        # Installer (Windows) and DMG (macOS) → save to temp (we launch/mount it immediately).
         metadata = AppConfig.get_installation_metadata()
         package_type = (metadata.get('package_type') or '').lower()
-        is_portable = package_type in ('portable', 'zip')
-        download_dir = get_downloads_folder() if is_portable else None
+        is_portable_or_deb = package_type in ('portable', 'zip', 'deb')
+        download_dir = get_downloads_folder() if is_portable_or_deb else None
         
         # Create progress dialog
         progress_dialog = QProgressDialog(

@@ -383,7 +383,9 @@ class InstallerLauncher:
                 return {
                     'success': True,
                     'action': 'launched',
-                    'message': 'Installer launched successfully.\n\nClick OK to close this app and complete the update.',
+                    'message': '✓ Installer launched successfully!\n\n'
+                              'The installer will open when you close this app.\n\n'
+                              'Click OK to close Argo Log Viewer and complete the update.',
                     'needs_manual': False
                 }
                 
@@ -392,7 +394,9 @@ class InstallerLauncher:
                 return {
                     'success': False,
                     'action': 'error',
-                    'message': f'Could not launch installer: {str(e)}\n\nPlease run manually: {file_path}',
+                    'message': f'Could not launch installer automatically.\n\n'
+                              f'Error: {str(e)}\n\n'
+                              f'Please run manually:\n{file_path}',
                     'needs_manual': True
                 }
         
@@ -400,12 +404,13 @@ class InstallerLauncher:
             return {
                 'success': True,
                 'action': 'prepared',
-                'message': f'Update downloaded successfully!\n\n'
-                          f'Location: {file_path}\n\n'
+                'message': f'✓ Update downloaded successfully!\n\n'
+                          f'Location:\n{file_path}\n\n'
                           f'To update:\n'
                           f'1. Close this application\n'
-                          f'2. Replace the old .exe with the new one\n'
-                          f'3. Run the new version',
+                          f'2. Replace your old ArgoLogViewer.exe with the new one\n'
+                          f'3. Run the new version\n\n'
+                          f'The file is in your Downloads folder.',
                 'needs_manual': True
             }
     
@@ -467,12 +472,15 @@ class InstallerLauncher:
                 return {
                     'success': True,
                     'action': 'prepared',
-                    'message': f'✅ Update downloaded and prepared!\n\n'
+                    'message': f'✓ Update downloaded and prepared!\n\n'
+                              f'The DMG has been mounted and is ready to install.\n\n'
                               f'To complete installation:\n\n'
-                              f'1. Quit this app (click OK below)\n'
-                              f'2. Drag ArgoLogViewer to Applications (replace old version)\n'
-                              f'3. System Settings → Privacy & Security\n'
-                              f'4. Click "Open Anyway" (same as first install!)\n\n'
+                              f'1. Click OK to close this app\n'
+                              f'2. Drag ArgoLogViewer to Applications folder (replace the old version)\n'
+                              f'3. Open System Settings → Privacy & Security\n'
+                              f'4. Scroll down and click "Open Anyway"\n'
+                              f'5. Confirm by clicking "Open"\n\n'
+                              f'(Same steps as when you first installed the app!)\n\n'
                               f'DMG Location: {file_path}',
                     'needs_manual': True
                 }
@@ -518,13 +526,16 @@ class InstallerLauncher:
                 return {
                     'success': True,
                     'action': 'prepared',
-                    'message': f'✅ Update downloaded and extracted!\n\n'
+                    'message': f'✓ Update downloaded and extracted!\n\n'
+                              f'The app bundle has been extracted and is ready to install.\n\n'
                               f'To complete installation:\n\n'
-                              f'1. Quit this app (click OK below)\n'
-                              f'2. Move ArgoLogViewer.app to Applications\n'
-                              f'3. System Settings → Privacy & Security\n'
-                              f'4. Click "Open Anyway"\n\n'
-                              f'Location: {extract_dir}',
+                              f'1. Click OK to close this app\n'
+                              f'2. Move ArgoLogViewer.app to your Applications folder\n'
+                              f'3. Open System Settings → Privacy & Security\n'
+                              f'4. Scroll down and click "Open Anyway"\n'
+                              f'5. Confirm by clicking "Open"\n\n'
+                              f'(Same steps as when you first installed the app!)\n\n'
+                              f'The file is in your Downloads folder:\n{extract_dir}',
                     'needs_manual': True
                 }
             
@@ -565,7 +576,10 @@ class InstallerLauncher:
                     return {
                         'success': True,
                         'action': 'launched',
-                        'message': 'Package installer launched.\n\nFollow the prompts to complete installation.',
+                        'message': '✓ Package installer launched!\n\n'
+                                  'A graphical password prompt will appear.\n'
+                                  'Enter your password to complete the installation.\n\n'
+                                  'Click OK to close Argo Log Viewer.',
                         'needs_manual': False
                     }
                     
@@ -576,10 +590,16 @@ class InstallerLauncher:
             return {
                 'success': True,
                 'action': 'prepared',
-                'message': f'Update downloaded successfully!\n\n'
-                          f'Run this command to install:\n\n'
+                'message': f'✓ Update downloaded to Downloads folder!\n\n'
+                          f'Run this command in terminal to install:\n\n'
                           f'sudo dpkg -i {file_path}\n\n'
-                          f'Or double-click the .deb file to install graphically.',
+                          f'Or:\n'
+                          f'• Click "Copy Command" below\n'
+                          f'• Open a terminal\n'
+                          f'• Paste and press Enter\n'
+                          f'• Enter your password when prompted\n\n'
+                          f'Alternatively, you can navigate to Downloads\n'
+                          f'and double-click the .deb file to install graphically.',
                 'needs_manual': True,
                 'install_command': f'sudo dpkg -i {file_path}'
             }
@@ -588,12 +608,15 @@ class InstallerLauncher:
             return {
                 'success': True,
                 'action': 'prepared',
-                'message': f'Update downloaded successfully!\n\n'
-                          f'Location: {file_path}\n\n'
-                          f'To update:\n'
-                          f'1. Make executable: chmod +x {os.path.basename(file_path)}\n'
-                          f'2. Replace your old binary with this one\n'
-                          f'3. Run the new version',
+                'message': f'✓ Update downloaded successfully!\n\n'
+                          f'Location:\n{file_path}\n\n'
+                          f'To update:\n\n'
+                          f'1. Open a terminal in your Downloads folder\n'
+                          f'2. Make executable:\n'
+                          f'   chmod +x {os.path.basename(file_path)}\n'
+                          f'3. Replace your old binary with this one\n'
+                          f'4. Run the new version\n\n'
+                          f'The file is in your Downloads folder.',
                 'needs_manual': True
             }
 
