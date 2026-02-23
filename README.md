@@ -119,6 +119,13 @@ Download the latest release from [GitHub Releases](../../releases).
 - **Quick Fix:** System Settings → Privacy & Security → Click "Open Anyway"
 - Or Terminal: `xattr -cr /Applications/ArgoLogViewer.app`
 
+**📋 NEW USERS: Follow these 5 steps exactly:**
+1. ✅ Download DMG → Install to Applications
+2. ✅ Try to open app (you'll see error) → Click "Done"
+3. ✅ **System Settings** → **Privacy & Security** → Scroll to **Security** section
+4. ✅ Click **"Open Anyway"** button
+5. ✅ Confirm → Done! App will now open normally forever
+
 ---
 
 ### 1. Clone or extract the project

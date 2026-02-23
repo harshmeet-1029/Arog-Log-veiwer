@@ -527,11 +527,11 @@ jobs:
           
           **Works on ALL macOS versions (Especially Sequoia 15.x, Sonoma 14.x, Ventura 13.x)**
           
-          1. Download DMG → Install to Applications
-          2. Try to open app (you'll see error) → Click "Done"
-          3. **System Settings** → **Privacy & Security** → Scroll to **Security** section
-          4. Click **"Open Anyway"** button
-          5. Confirm → ✅ Done!
+          1. ✅ Download DMG → Install to Applications
+          2. ✅ Try to open app (you'll see error) → Click "Done"
+          3. ✅ **System Settings** → **Privacy & Security** → Scroll to **Security** section
+          4. ✅ Click **"Open Anyway"** button
+          5. ✅ Confirm → Done! App will now open normally forever
           
           #### Method 2: Right-Click (May not work on macOS Sequoia 15.x)
           
@@ -606,15 +606,15 @@ jobs:
           
           **⚠️ IMPORTANT: You MUST follow these steps to bypass macOS Gatekeeper:**
           
-          1. Download the correct DMG file for your Mac type (see table above)
-          2. Open the DMG file and drag "ArgoLogViewer" to Applications folder
-          3. **Do NOT double-click the app yet!**
-          4. Try to open the app from Applications (you'll see an error - this is expected)
-          5. **Go to System Settings → Privacy & Security**
-          6. **Scroll down to Security section**
-          7. **Click "Open Anyway" button** (appears after step 4)
-          8. Confirm by clicking "Open"
-          9. ✅ Done! App will now open normally forever
+          1. ✅ Download the correct DMG file for your Mac type (see table above)
+          2. ✅ Open the DMG file and drag "ArgoLogViewer" to Applications folder
+          3. ✅ **Do NOT double-click the app yet!**
+          4. ✅ Try to open the app from Applications (you'll see an error - this is expected)
+          5. ✅ **Go to System Settings → Privacy & Security**
+          6. ✅ **Scroll down to Security section**
+          7. ✅ **Click "Open Anyway" button** (appears after step 4)
+          8. ✅ Confirm by clicking "Open"
+          9. ✅ **Done! App will now open normally forever**
           
           **Alternative:** Right-click the app → "Open" → "Open" again (may not work on macOS Sequoia 15.x)
           
