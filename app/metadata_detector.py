@@ -139,14 +139,28 @@ class MetadataDetector:
                 logger.debug("Detected Windows installer installation")
                 return 'installer'
             
-            # Check Windows registry for installation
+            # Check Windows registry for installation (use the AppId GUID)
             try:
                 import winreg
-                key_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\ArgoLogViewer"
-                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path, 0, winreg.KEY_READ):
-                    logger.debug("Found registry entry - installer installation")
-                    return 'installer'
-            except (ImportError, OSError):
+                # Try HKEY_LOCAL_MACHINE first (for admin installs)
+                try:
+                    key_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{A7B8C9D0-E1F2-4A5B-8C9D-0E1F2A3B4C5D}_is1"
+                    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path, 0, winreg.KEY_READ):
+                        logger.debug("Found HKLM registry entry - installer installation")
+                        return 'installer'
+                except OSError:
+                    pass
+                
+                # Try HKEY_CURRENT_USER (for user-only installs)
+                try:
+                    key_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{A7B8C9D0-E1F2-4A5B-8C9D-0E1F2A3B4C5D}_is1"
+                    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_READ):
+                        logger.debug("Found HKCU registry entry - installer installation")
+                        return 'installer'
+                except OSError:
+                    pass
+                    
+            except ImportError:
                 pass
             
             logger.debug("Detected Windows portable installation")

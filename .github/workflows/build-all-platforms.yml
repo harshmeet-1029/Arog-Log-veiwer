@@ -70,6 +70,7 @@ jobs:
           --hidden-import=PySide6 `
           --hidden-import=paramiko `
           --hidden-import=cryptography `
+          --hidden-import=app.build_metadata `
           --icon=app/icon.ico `
           --clean `
           app/main.py
@@ -110,6 +111,7 @@ jobs:
           --hidden-import=PySide6 `
           --hidden-import=paramiko `
           --hidden-import=cryptography `
+          --hidden-import=app.build_metadata `
           --icon=app/icon.ico `
           --clean `
           app/main.py
@@ -220,6 +222,7 @@ jobs:
           --hidden-import=PySide6 \
           --hidden-import=paramiko \
           --hidden-import=cryptography \
+          --hidden-import=app.build_metadata \
           --clean \
           --osx-bundle-identifier=com.harshmeetsingh.argologviewer \
           --target-arch arm64 \
@@ -337,6 +340,7 @@ jobs:
           --hidden-import=PySide6 \
           --hidden-import=paramiko \
           --hidden-import=cryptography \
+          --hidden-import=app.build_metadata \
           --clean \
           app/main.py
     
