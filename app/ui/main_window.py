@@ -3727,6 +3727,10 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
             
             def run(self):
                 try:
+                    # Refresh metadata BEFORE checking for updates
+                    from app.metadata_detector import MetadataDetector
+                    MetadataDetector.detect()  # This will update the cache
+                    
                     self.update_info = UpdateChecker.check_for_updates()
                     UpdateChecker.mark_update_checked()
                 except Exception as e:
@@ -3743,19 +3747,27 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
         # Get current metadata
         metadata = AppConfig.get_installation_metadata()
         
+        # Get app version from pyproject.toml or metadata
+        try:
+            import tomllib
+            with open('pyproject.toml', 'rb') as f:
+                pyproject = tomllib.load(f)
+                app_version = pyproject['project']['version']
+        except:
+            app_version = metadata.get('version', 'Unknown')
+        
         # Build info message
         platform = metadata.get('platform', 'Unknown')
         package_type = metadata.get('package_type', 'Unknown')
         architecture = metadata.get('architecture', 'Unknown')
-        version = metadata.get('version', 'Unknown')
         source = metadata.get('source', 'Unknown')
         
         message = (
             f"<b>Current Installation Details:</b><br><br>"
+            f"<b>App Version:</b> {app_version}<br>"
             f"<b>Platform:</b> {platform}<br>"
             f"<b>Package Type:</b> {package_type}<br>"
             f"<b>Architecture:</b> {architecture}<br>"
-            f"<b>Version:</b> {version}<br>"
             f"<b>Detection Source:</b> {source}<br><br>"
             f"<i>If this looks incorrect, click 'Refresh Detection' to re-detect.</i>"
         )
@@ -3821,12 +3833,22 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
         # Show new info
         from PySide6.QtWidgets import QMessageBox
         
+        # Get app version
+        try:
+            import tomllib
+            with open('pyproject.toml', 'rb') as f:
+                pyproject = tomllib.load(f)
+                app_version = pyproject['project']['version']
+        except:
+            app_version = 'Unknown'
+        
         platform = new_metadata.get('platform', 'Unknown')
         package_type = new_metadata.get('package_type', 'Unknown')
         architecture = new_metadata.get('architecture', 'Unknown')
         
         message = (
             f"<b>Re-detected Installation:</b><br><br>"
+            f"<b>App Version:</b> {app_version}<br>"
             f"<b>Platform:</b> {platform}<br>"
             f"<b>Package Type:</b> {package_type}<br>"
             f"<b>Architecture:</b> {architecture}<br><br>"
