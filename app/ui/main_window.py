@@ -3783,7 +3783,7 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
         logger.info("Refreshing installation metadata")
         
         # Clear cached metadata
-        config_path = AppConfig.get_config_path()
+        config_path = AppConfig.get_config_file_path()
         try:
             import json
             with open(config_path, 'r') as f:
