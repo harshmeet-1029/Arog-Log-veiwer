@@ -43,6 +43,24 @@ jobs:
         pip install -r requirements.txt
         pip install pyinstaller
     
+    - name: Generate build metadata for Windows Portable
+      shell: bash
+      run: |
+        echo "📝 Generating build metadata for Windows Portable..."
+        cat > app/build_metadata.py << 'EOF'
+        """
+        Build metadata - Auto-generated during build process.
+        DO NOT EDIT MANUALLY.
+        """
+        PLATFORM = "windows"
+        PACKAGE_TYPE = "portable"
+        ARCHITECTURE = "amd64"
+        BUILD_DATE = "${{ github.event.inputs.version }}"
+        VERSION = "${{ github.event.inputs.version }}"
+        EOF
+        echo "✅ Build metadata generated for Windows Portable"
+        cat app/build_metadata.py
+    
     - name: Build Windows executable
       run: |
         pyinstaller --name="ArgoLogViewer" `
@@ -65,6 +83,23 @@ jobs:
       run: |
         choco install innosetup -y
         echo "✅ Inno Setup installed"
+    
+    - name: Generate build metadata for Windows Installer
+      shell: bash
+      run: |
+        echo "📝 Regenerating build metadata for Windows Installer..."
+        cat > app/build_metadata.py << 'EOF'
+        """
+        Build metadata - Auto-generated during build process.
+        DO NOT EDIT MANUALLY.
+        """
+        PLATFORM = "windows"
+        PACKAGE_TYPE = "installer"
+        ARCHITECTURE = "amd64"
+        BUILD_DATE = "${{ github.event.inputs.version }}"
+        VERSION = "${{ github.event.inputs.version }}"
+        EOF
+        echo "✅ Build metadata updated for Windows Installer"
     
     - name: Build Windows Installer
       run: |
@@ -139,6 +174,23 @@ jobs:
         iconutil -c icns app/icon.iconset -o app/icon.icns
         rm -rf app/icon.iconset
         echo "✅ Icon created: app/icon.icns"
+    
+    - name: Generate build metadata for macOS Apple Silicon
+      run: |
+        echo "📝 Generating build metadata for macOS Apple Silicon..."
+        cat > app/build_metadata.py << 'EOF'
+        """
+        Build metadata - Auto-generated during build process.
+        DO NOT EDIT MANUALLY.
+        """
+        PLATFORM = "macos"
+        PACKAGE_TYPE = "dmg"
+        ARCHITECTURE = "arm64"
+        BUILD_DATE = "${{ github.event.inputs.version }}"
+        VERSION = "${{ github.event.inputs.version }}"
+        EOF
+        echo "✅ Build metadata generated for macOS Apple Silicon"
+        cat app/build_metadata.py
     
     - name: Build macOS Apple Silicon app
       run: |
@@ -246,6 +298,23 @@ jobs:
         pip install -r requirements.txt
         pip install pyinstaller
     
+    - name: Generate build metadata for Linux Portable
+      run: |
+        echo "📝 Generating build metadata for Linux Portable..."
+        cat > app/build_metadata.py << 'EOF'
+        """
+        Build metadata - Auto-generated during build process.
+        DO NOT EDIT MANUALLY.
+        """
+        PLATFORM = "linux"
+        PACKAGE_TYPE = "portable"
+        ARCHITECTURE = "amd64"
+        BUILD_DATE = "${{ github.event.inputs.version }}"
+        VERSION = "${{ github.event.inputs.version }}"
+        EOF
+        echo "✅ Build metadata generated for Linux Portable"
+        cat app/build_metadata.py
+    
     - name: Build Linux binary
       run: |
         pyinstaller --name="ArgoLogViewer" \
@@ -265,6 +334,20 @@ jobs:
     
     - name: Create DEB package structure
       run: |
+        echo "📝 Regenerating build metadata for Linux DEB..."
+        cat > app/build_metadata.py << 'EOF'
+        """
+        Build metadata - Auto-generated during build process.
+        DO NOT EDIT MANUALLY.
+        """
+        PLATFORM = "linux"
+        PACKAGE_TYPE = "deb"
+        ARCHITECTURE = "amd64"
+        BUILD_DATE = "${{ github.event.inputs.version }}"
+        VERSION = "${{ github.event.inputs.version }}"
+        EOF
+        echo "✅ Build metadata updated for Linux DEB"
+        
         VERSION="${{ github.event.inputs.version }}"
         DEBDIR="argologviewer_${VERSION}_amd64"
         

@@ -48,6 +48,7 @@ checksums*.txt
 *.spec
 app/icon.icns
 app/icon.iconset/
+app/build_metadata.py
 
 # OS
 Thumbs.db
@@ -78,3 +79,4 @@ htmlcov/
 .mypy_cache/
 .dmypy.json
 dmypy.json
+.cursor/

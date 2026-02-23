@@ -417,6 +417,67 @@ class AppConfig:
         config = AppConfig.load_config()
         config['auto_reconnect'] = enabled
         AppConfig.save_config(config)
+    
+    @staticmethod
+    def get_installation_metadata() -> dict:
+        """
+        Get installation metadata (platform, package_type, architecture).
+        
+        Priority:
+        1. Check cached metadata in config.json
+        2. Try to load from build_metadata.py (embedded during build)
+        3. Fall back to runtime detection
+        
+        Returns:
+            Dictionary with keys: platform, package_type, architecture
+        """
+        config = AppConfig.load_config()
+        
+        # Check if we have cached metadata
+        cached_metadata = config.get('installation_metadata')
+        if cached_metadata and isinstance(cached_metadata, dict):
+            logger.debug(f"Using cached installation metadata: {cached_metadata}")
+            return cached_metadata
+        
+        # Try to load from build_metadata.py
+        try:
+            from app import build_metadata
+            metadata = {
+                'platform': build_metadata.PLATFORM,
+                'package_type': build_metadata.PACKAGE_TYPE,
+                'architecture': build_metadata.ARCHITECTURE
+            }
+            logger.info(f"Loaded metadata from build_metadata.py: {metadata}")
+            
+            # Cache it for next time
+            config['installation_metadata'] = metadata
+            AppConfig.save_config(config)
+            
+            return metadata
+            
+        except ImportError:
+            logger.debug("build_metadata.py not found, using runtime detection")
+        except Exception as e:
+            logger.warning(f"Error loading build_metadata.py: {e}")
+        
+        # Fall back to runtime detection
+        from app.metadata_detector import MetadataDetector
+        metadata = MetadataDetector.detect()
+        logger.info(f"Detected installation metadata at runtime: {metadata}")
+        
+        # Cache it
+        config['installation_metadata'] = metadata
+        AppConfig.save_config(config)
+        
+        return metadata
+    
+    @staticmethod
+    def clear_installation_metadata() -> None:
+        """Clear cached installation metadata (for testing/debugging)."""
+        config = AppConfig.load_config()
+        config.pop('installation_metadata', None)
+        AppConfig.save_config(config)
+        logger.info("Cleared cached installation metadata")
 
 
 class UpdateConfig:

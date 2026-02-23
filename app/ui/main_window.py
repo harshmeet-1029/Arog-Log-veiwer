@@ -3755,7 +3755,7 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
                 )
     
     def _show_update_notification(self, update_info: UpdateInfo):
-        """Show a non-intrusive update notification."""
+        """Show a non-intrusive update notification with download details."""
         msg_box = QMessageBox(self)
         msg_box.setWindowTitle("Update Available")
         msg_box.setIcon(QMessageBox.Icon.Information)
@@ -3766,12 +3766,23 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
         else:
             msg_box.setText(f"Update Available: v{update_info.version}")
         
-        msg_box.setInformativeText(
+        # Build informative text with file details
+        info_text = (
             f"A new version of Argo Log Viewer is available.\n\n"
             f"Current version: {UpdateConfig.get_current_version()}\n"
-            f"New version: {update_info.version}\n\n"
-            "Would you like to download it now?"
+            f"New version: {update_info.version}\n"
         )
+        
+        # Add file details if available
+        if update_info.file_name:
+            info_text += f"\nPackage: {update_info.file_name}"
+        if update_info.file_size:
+            size_mb = update_info.file_size / (1024 * 1024)
+            info_text += f"\nSize: {size_mb:.1f} MB"
+        
+        info_text += "\n\nWould you like to download and install it now?"
+        
+        msg_box.setInformativeText(info_text)
         
         msg_box.setStandardButtons(
             QMessageBox.StandardButton.Yes | 
@@ -3869,27 +3880,260 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
         dialog.exec()
     
     def _download_update(self, update_info: UpdateInfo):
-        """Open browser to GitHub releases page."""
-        logger.info(f"Opening GitHub releases page: {update_info.download_url}")
-        try:
-            webbrowser.open(update_info.download_url)
-            QMessageBox.information(
-                self,
-                "Opening Releases Page",
-                "Your browser will open the GitHub releases page.\n\n"
-                "Please download the correct version for your platform:\n"
-                "• Windows: .exe file\n"
-                "• macOS: .dmg or .zip file\n"
-                "• Linux: Linux binary\n\n"
-                "After downloading, install and restart the application."
-            )
-        except Exception as e:
-            logger.error(f"Error opening releases page: {e}")
+        """Download and install update."""
+        logger.info(f"Starting update download: {update_info.version}")
+        
+        # Check if we have a direct asset URL
+        if not update_info.asset_url:
+            # Fall back to browser if no direct download available
+            logger.warning("No direct download URL, falling back to browser")
+            try:
+                webbrowser.open(update_info.download_url)
+                QMessageBox.information(
+                    self,
+                    "Opening Releases Page",
+                    "Your browser will open the GitHub releases page.\n\n"
+                    "Please download the correct version for your platform."
+                )
+            except Exception as e:
+                logger.error(f"Error opening releases page: {e}")
+                QMessageBox.critical(
+                    self,
+                    "Error",
+                    f"Could not open releases page:\n{update_info.download_url}"
+                )
+            return
+        
+        # Show progress dialog
+        self._show_download_progress_dialog(update_info)
+    
+    def _show_download_progress_dialog(self, update_info: UpdateInfo):
+        """Show download progress dialog and start download."""
+        from PySide6.QtWidgets import QProgressDialog
+        from app.update_downloader import UpdateDownloaderThread
+        
+        # Create progress dialog
+        progress_dialog = QProgressDialog(
+            f"Downloading {update_info.file_name}...",
+            "Cancel",
+            0,
+            100,
+            self
+        )
+        progress_dialog.setWindowTitle(f"Downloading Update v{update_info.version}")
+        progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        progress_dialog.setMinimumWidth(500)
+        progress_dialog.setAutoClose(False)
+        progress_dialog.setAutoReset(False)
+        
+        # Create downloader thread
+        self.download_thread = UpdateDownloaderThread(
+            update_info.asset_url,
+            update_info.file_name,
+            update_info.file_size
+        )
+        
+        # Connect signals
+        def on_progress(downloaded, total, speed):
+            if total > 0:
+                percent = int((downloaded / total) * 100)
+                progress_dialog.setValue(percent)
+                
+                # Update label with details
+                downloaded_mb = downloaded / (1024 * 1024)
+                total_mb = total / (1024 * 1024)
+                progress_dialog.setLabelText(
+                    f"Downloading {update_info.file_name}...\n\n"
+                    f"Progress: {downloaded_mb:.1f} MB / {total_mb:.1f} MB ({percent}%)\n"
+                    f"Speed: {speed:.2f} MB/s"
+                )
+        
+        def on_completed(file_path):
+            progress_dialog.close()
+            logger.info(f"Download completed: {file_path}")
+            
+            # Verify checksum if available
+            if update_info.checksum_url:
+                self._verify_and_install(file_path, update_info)
+            else:
+                logger.warning("No checksum URL, skipping verification")
+                self._install_update(file_path, update_info)
+        
+        def on_error(error_msg):
+            progress_dialog.close()
+            logger.error(f"Download error: {error_msg}")
             QMessageBox.critical(
                 self,
-                "Error",
-                f"Could not open releases page:\n{update_info.download_url}\n\n"
-                "Please visit GitHub manually to download the update."
+                "Download Failed",
+                f"Failed to download update:\n\n{error_msg}"
+            )
+        
+        def on_cancel():
+            if hasattr(self, 'download_thread'):
+                self.download_thread.cancel()
+                logger.info("User cancelled download")
+        
+        self.download_thread.progress.connect(on_progress)
+        self.download_thread.completed.connect(on_completed)
+        self.download_thread.error.connect(on_error)
+        progress_dialog.canceled.connect(on_cancel)
+        
+        # Start download
+        self.download_thread.start()
+        progress_dialog.exec()
+    
+    def _verify_and_install(self, file_path: str, update_info: UpdateInfo):
+        """Verify checksum and install update."""
+        from PySide6.QtWidgets import QProgressDialog
+        from app.update_downloader import UpdateDownloader
+        
+        # Show verification progress
+        verify_dialog = QProgressDialog(
+            "Verifying download integrity...",
+            None,
+            0,
+            0,
+            self
+        )
+        verify_dialog.setWindowTitle("Verifying Update")
+        verify_dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        verify_dialog.setCancelButton(None)
+        verify_dialog.show()
+        
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(100, lambda: self._do_verification(file_path, update_info, verify_dialog))
+    
+    def _do_verification(self, file_path: str, update_info: UpdateInfo, verify_dialog):
+        """Perform checksum verification."""
+        from app.update_downloader import UpdateDownloader
+        
+        try:
+            # Download checksums
+            checksums = UpdateDownloader.download_checksums(update_info.checksum_url)
+            
+            if not checksums:
+                verify_dialog.close()
+                logger.warning("Could not download checksums")
+                
+                # Ask user if they want to proceed anyway
+                reply = QMessageBox.question(
+                    self,
+                    "Verification Warning",
+                    "Could not verify download integrity (checksums unavailable).\n\n"
+                    "Do you want to proceed with installation anyway?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                )
+                
+                if reply == QMessageBox.StandardButton.Yes:
+                    self._install_update(file_path, update_info)
+                return
+            
+            # Get expected checksum
+            expected_checksum = checksums.get(update_info.file_name)
+            
+            if not expected_checksum:
+                verify_dialog.close()
+                logger.warning(f"No checksum found for {update_info.file_name}")
+                
+                reply = QMessageBox.question(
+                    self,
+                    "Verification Warning",
+                    f"No checksum found for {update_info.file_name}.\n\n"
+                    "Do you want to proceed anyway?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                )
+                
+                if reply == QMessageBox.StandardButton.Yes:
+                    self._install_update(file_path, update_info)
+                return
+            
+            # Verify checksum
+            is_valid = UpdateDownloader.verify_checksum(file_path, expected_checksum)
+            verify_dialog.close()
+            
+            if is_valid:
+                logger.info("✓ Checksum verification passed")
+                self._install_update(file_path, update_info)
+            else:
+                logger.error("✗ Checksum verification failed")
+                QMessageBox.critical(
+                    self,
+                    "Verification Failed",
+                    "Download integrity check failed!\n\n"
+                    "The downloaded file may be corrupted or tampered with.\n"
+                    "Please try downloading again."
+                )
+                # Clean up
+                import os
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+        
+        except Exception as e:
+            verify_dialog.close()
+            logger.error(f"Error during verification: {e}", exc_info=True)
+            QMessageBox.critical(
+                self,
+                "Verification Error",
+                f"Error verifying download:\n\n{str(e)}"
+            )
+    
+    def _install_update(self, file_path: str, update_info: UpdateInfo):
+        """Install the downloaded update."""
+        from app.update_downloader import InstallerLauncher
+        from app.config import AppConfig
+        
+        logger.info(f"Installing update from {file_path}")
+        
+        # Get installation metadata
+        metadata = AppConfig.get_installation_metadata()
+        
+        # Launch installer
+        result = InstallerLauncher.launch(file_path, metadata)
+        
+        if result['success']:
+            if result['action'] == 'launched':
+                # Installer launched - show confirmation and exit
+                reply = QMessageBox.information(
+                    self,
+                    "Update Ready",
+                    result['message'],
+                    QMessageBox.StandardButton.Ok
+                )
+                
+                # Exit application
+                from PySide6.QtWidgets import QApplication
+                QApplication.quit()
+            
+            elif result['action'] == 'prepared':
+                # Manual steps needed - show instructions
+                msg_box = QMessageBox(self)
+                msg_box.setWindowTitle("Update Ready")
+                msg_box.setIcon(QMessageBox.Icon.Information)
+                msg_box.setText(result['message'])
+                msg_box.setStandardButtons(QMessageBox.StandardButton.Ok)
+                
+                # Add copy button for Linux command if available
+                if 'install_command' in result:
+                    copy_btn = msg_box.addButton("Copy Command", QMessageBox.ButtonRole.ActionRole)
+                    
+                    def copy_command():
+                        from PySide6.QtWidgets import QApplication
+                        QApplication.clipboard().setText(result['install_command'])
+                    
+                    copy_btn.clicked.connect(copy_command)
+                
+                msg_box.exec()
+                
+                # Exit if needs manual steps
+                if result.get('needs_manual'):
+                    from PySide6.QtWidgets import QApplication
+                    QApplication.quit()
+        else:
+            # Error occurred
+            QMessageBox.critical(
+                self,
+                "Installation Error",
+                result['message']
             )
     
     def _check_memory_warning(self):
