@@ -35,8 +35,6 @@ ArchitecturesInstallIn64BitMode=x64
 DisableProgramGroupPage=yes
 WizardImageFile=compiler:WizModernImage.bmp
 WizardSmallImageFile=compiler:WizModernSmallImage.bmp
-CloseApplications=force
-CloseApplicationsFilter=*.exe
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -69,13 +67,8 @@ var
 begin
   Result := True;
   
-  // Force close any running instances of ArgoLogViewer
-  Exec('taskkill', '/F /IM ArgoLogViewer.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec('taskkill', '/F /IM ArgoLogViewer-Installer.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec('taskkill', '/F /IM ArgoLogViewer-Portable.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  
-  // Small delay to ensure processes are fully closed
-  Sleep(1000);
+  // Check if Python is required (for development builds)
+  // For standalone .exe, this is not needed
   
   // Check for required system components
   if not FileExists(ExpandConstant('{sys}\VCRUNTIME140.dll')) then
