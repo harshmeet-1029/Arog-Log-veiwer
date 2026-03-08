@@ -540,22 +540,31 @@ class UpdateConfig:
         """
         Get current application version.
         
-        Reads from pyproject.toml if available (during development),
-        falls back to default version for frozen/bundled builds.
+        Priority:
+        1. build_metadata.py (correct in built/installed apps)
+        2. pyproject.toml (dev mode)
+        3. Hardcoded fallback
         
         Returns:
-            Version string (e.g., "1.0.0")
+            Version string (e.g., "1.0.1")
         """
-        # Try to read from pyproject.toml first
-        version = UpdateConfig._read_version_from_pyproject()
-        
-        # Fall back to default version if pyproject.toml not available
-        # This happens when the app is frozen (PyInstaller) or installed
-        if version is None:
-            version = "1.0.0"  # Fallback version
-            logger.debug(f"Using fallback version: {version}")
-        
-        return version
+        # 1. Try build_metadata.py first - always correct in built apps
+        try:
+            from app import build_metadata
+            if hasattr(build_metadata, 'VERSION') and build_metadata.VERSION:
+                logger.info(f"Version from build_metadata: {build_metadata.VERSION}")
+                return build_metadata.VERSION
+        except ImportError:
+            pass
+
+        # 2. Try pyproject.toml (dev mode only)
+        ver = UpdateConfig._read_version_from_pyproject()
+        if ver:
+            return ver
+
+        # 3. Last resort fallback
+        logger.warning("Could not determine version, using fallback 1.0.0")
+        return "1.0.0"
     
     @staticmethod
     def get_update_server_url() -> str:
