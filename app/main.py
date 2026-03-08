@@ -156,21 +156,29 @@ def _set_application_icon(app):
         else:
             logger.warning("Could not load application icon - file not found")
 
-        # On Linux portable builds, only register a .desktop file if the binary
-        # is in a stable system location (e.g. /usr/local/bin, /opt, ~/bin).
-        # Running from Downloads or /tmp is temporary — registering there causes
-        # a broken app launcher entry after the file is deleted/moved.
+        # On Linux, only register a local .desktop file for PORTABLE builds.
+        # DEB builds already have a system-wide .desktop via the package installer —
+        # registering again from the app would create a duplicate icon in the launcher.
         if sys.platform.startswith('linux') and getattr(sys, 'frozen', False) and icon_path:
-            exe = sys.executable
-            stable_prefixes = ('/usr/', '/opt/', '/bin/', '/sbin/',
-                               os.path.expanduser('~/bin'),
-                               os.path.expanduser('~/.local/bin'))
-            if any(exe.startswith(p) for p in stable_prefixes):
-                _register_linux_portable_icon(icon_path)
+            try:
+                from app import build_metadata
+                is_portable = getattr(build_metadata, 'PACKAGE_TYPE', '') == 'portable'
+            except ImportError:
+                is_portable = False
+
+            if is_portable:
+                exe = sys.executable
+                stable_prefixes = ('/usr/', '/opt/', '/bin/', '/sbin/',
+                                   os.path.expanduser('~/bin'),
+                                   os.path.expanduser('~/.local/bin'))
+                if any(exe.startswith(p) for p in stable_prefixes):
+                    _register_linux_portable_icon(icon_path)
+                else:
+                    logger.info(
+                        f"Skipping .desktop registration — portable binary not in stable location: {exe}"
+                    )
             else:
-                logger.info(
-                    f"Skipping .desktop registration — binary is not in a stable location: {exe}"
-                )
+                logger.info("Skipping .desktop registration — DEB build has system-wide .desktop already")
 
     except Exception as e:
         logger.error(f"Error setting application icon: {e}", exc_info=True)
