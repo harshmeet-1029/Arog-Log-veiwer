@@ -569,62 +569,68 @@ del "%~f0"
             Result dictionary
         """
         if package_type == 'deb':
-            # Try to launch graphical package installer if available
-            install_cmd = None
-            
-            # Try pkexec (graphical sudo prompt)
+            # Try pkexec first (graphical sudo prompt - fully automatic)
             if shutil.which('pkexec'):
-                install_cmd = ['pkexec', 'dpkg', '-i', file_path]
-            
-            if install_cmd:
                 try:
-                    logger.info(f"Launching DEB installer: {' '.join(install_cmd)}")
-                    subprocess.Popen(install_cmd)
+                    logger.info(f"Launching DEB installer via pkexec: {file_path}")
+                    
+                    # Write a script that installs the DEB and then deletes it
+                    script_path = '/tmp/argo_deb_install.sh'
+                    with open(script_path, 'w') as f:
+                        f.write(f"""#!/bin/bash
+pkexec dpkg -i "{file_path}"
+rm -f "{file_path}"
+rm -f "$0"
+""")
+                    os.chmod(script_path, 0o755)
+                    subprocess.Popen(['bash', script_path])
                     
                     return {
                         'success': True,
                         'action': 'launched',
-                        'message': '✓ Package installer launched!\n\n'
-                                  'A graphical password prompt will appear.\n'
-                                  'Enter your password to complete the installation.\n\n'
-                                  'Click OK to close Argo Log Viewer.',
                         'needs_manual': False
                     }
                     
                 except Exception as e:
                     logger.warning(f"Could not launch graphical installer: {e}")
             
-            # Fall back to showing command
+            # Fall back to showing command (no pkexec available)
             return {
                 'success': True,
                 'action': 'prepared',
                 'message': f'✓ Update downloaded to Downloads folder!\n\n'
                           f'Run this command in terminal to install:\n\n'
                           f'sudo dpkg -i {file_path}\n\n'
-                          f'Or:\n'
-                          f'• Click "Copy Command" below\n'
-                          f'• Open a terminal\n'
-                          f'• Paste and press Enter\n'
-                          f'• Enter your password when prompted\n\n'
-                          f'Alternatively, you can navigate to Downloads\n'
-                          f'and double-click the .deb file to install graphically.',
+                          f'After installing, you can delete the .deb file.',
                 'needs_manual': True,
-                'install_command': f'sudo dpkg -i {file_path}'
+                'install_command': f'sudo dpkg -i "{file_path}"'
             }
         
         else:  # portable
+            # chmod +x automatically so user can just run it
+            try:
+                import stat as stat_module
+                current_perms = os.stat(file_path).st_mode
+                os.chmod(file_path, current_perms | stat_module.S_IEXEC | stat_module.S_IXGRP | stat_module.S_IXOTH)
+                logger.info(f"Made portable binary executable: {file_path}")
+                chmod_done = True
+            except Exception as e:
+                logger.warning(f"Could not chmod: {e}")
+                chmod_done = False
+            
+            file_name = os.path.basename(file_path)
+            chmod_note = "" if chmod_done else f"\n\nFirst make it executable:\nchmod +x {file_name}"
+            
             return {
                 'success': True,
                 'action': 'prepared',
-                'message': f'✓ Update downloaded successfully!\n\n'
-                          f'Location:\n{file_path}\n\n'
-                          f'To update:\n\n'
-                          f'1. Open a terminal in your Downloads folder\n'
-                          f'2. Make executable:\n'
-                          f'   chmod +x {os.path.basename(file_path)}\n'
-                          f'3. Replace your old binary with this one\n'
-                          f'4. Run the new version\n\n'
-                          f'The file is in your Downloads folder.',
+                'message': f'✓ Update ready!\n\n'
+                          f'Location: {file_path}\n\n'
+                          f'To run the new version:\n\n'
+                          f'1. Click OK to close this app\n'
+                          f'2. Open a terminal in your Downloads folder\n'
+                          f'3. Run: ./{file_name}'
+                          f'{chmod_note}',
                 'needs_manual': True
             }
 
