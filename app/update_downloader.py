@@ -646,32 +646,59 @@ rm -f "$0"
             }
         
         else:  # portable
-            # chmod +x automatically so user can just run it
+            # chmod +x automatically
             try:
                 import stat as stat_module
                 current_perms = os.stat(file_path).st_mode
                 os.chmod(file_path, current_perms | stat_module.S_IEXEC | stat_module.S_IXGRP | stat_module.S_IXOTH)
                 logger.info(f"Made portable binary executable: {file_path}")
-                chmod_done = True
             except Exception as e:
                 logger.warning(f"Could not chmod: {e}")
-                chmod_done = False
-            
+
+            import sys
             file_name = os.path.basename(file_path)
-            
-            return {
-                'success': True,
-                'action': 'prepared',
-                'message': f'Update downloaded to:\n{file_path}\n\n'
-                          f'How to run it:\n\n'
-                          f'Option A - Terminal (recommended):\n'
-                          f'  cd ~/Downloads\n'
-                          f'  ./{file_name}\n\n'
-                          f'Option B - File Manager:\n'
-                          f'  Right-click the file\n'
-                          f'  Properties > Permissions\n'
-                          f'  Check "Allow executing as program"\n'
-                          f'  Then double-click to launch',
-                'needs_manual': True
-            }
+            current_exe = sys.executable
+
+            # Check if the current binary is in a stable system path
+            stable_prefixes = ('/usr/', '/opt/', '/bin/', '/sbin/')
+            home_bin_prefixes = (
+                os.path.expanduser('~/bin/'),
+                os.path.expanduser('~/.local/bin/'),
+            )
+            all_stable = stable_prefixes + home_bin_prefixes
+            in_stable_path = any(current_exe.startswith(p) for p in all_stable)
+
+            if in_stable_path:
+                # User has the binary installed in a proper location —
+                # tell them to replace it there so the app launcher icon keeps working
+                return {
+                    'success': True,
+                    'action': 'prepared',
+                    'message': f'Update downloaded to:\n{file_path}\n\n'
+                              f'You are running from a system path:\n{current_exe}\n\n'
+                              f'To update and keep your app launcher icon working,\n'
+                              f'replace the old binary with the new one:\n\n'
+                              f'  sudo mv "{file_path}" "{current_exe}"\n'
+                              f'  sudo chmod +x "{current_exe}"\n\n'
+                              f'Then relaunch the app from your usual location.',
+                    'needs_manual': True,
+                    'install_command': f'sudo mv "{file_path}" "{current_exe}" && sudo chmod +x "{current_exe}"'
+                }
+            else:
+                # Running from Downloads or a temp location — just tell them to run it
+                return {
+                    'success': True,
+                    'action': 'prepared',
+                    'message': f'Update downloaded to:\n{file_path}\n\n'
+                              f'How to run it:\n\n'
+                              f'Option A - Terminal (recommended):\n'
+                              f'  cd ~/Downloads\n'
+                              f'  ./{file_name}\n\n'
+                              f'Option B - File Manager:\n'
+                              f'  Right-click the file\n'
+                              f'  Properties > Permissions\n'
+                              f'  Check "Allow executing as program"\n'
+                              f'  Then double-click to launch',
+                    'needs_manual': True
+                }
 
