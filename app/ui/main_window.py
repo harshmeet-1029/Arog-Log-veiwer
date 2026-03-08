@@ -1194,7 +1194,7 @@ class MainWindow(QWidget):
             
         except Exception as e:
             logger.error(f"Failed to start metrics monitoring (logs unaffected): {e}", exc_info=True)
-            self.metrics_label.setText("│ ⚠️ Metrics unavailable")
+            self.metrics_label.setText("│ [!] Metrics unavailable")
             self.is_monitoring_metrics = False
             self.stop_metrics_btn.setVisible(False)
     
@@ -1354,7 +1354,7 @@ class MainWindow(QWidget):
                 self.metrics_label.setText("│ ⚠️ Metrics server not installed")
                 self.metrics_label.setToolTip("Install metrics-server in cluster for resource monitoring. Logs are working normally.")
             else:
-                self.metrics_label.setText("│ ⚠️ Metrics unavailable")
+                self.metrics_label.setText("│ [!] Metrics unavailable")
                 self.metrics_label.setToolTip(f"Error: {error_msg}. Logs are working normally.")
             
             self.is_monitoring_metrics = False
@@ -2153,7 +2153,7 @@ class MainWindow(QWidget):
                 if self.metrics_connection_worker.error_msg:
                     logger.warning(f"Failed to create metrics connection: {self.metrics_connection_worker.error_msg}")
                     self.console_output.append(f"[WARNING] Metrics connection failed: {self.metrics_connection_worker.error_msg}\n")
-                    self.metrics_label.setText("│ ⚠️ Metrics unavailable")
+                    self.metrics_label.setText("│ [!] Metrics unavailable")
                 elif self.metrics_connection_worker.ssh_manager:
                     self.ssh_manager_metrics = self.metrics_connection_worker.ssh_manager
                     logger.info("Metrics SSH connection established")
@@ -4206,9 +4206,16 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
         
         if result['success']:
             if result['action'] == 'launched':
-                # Installer launched - exit immediately (no dialog!)
                 logger.info("Installer launched, exiting app now")
                 from PySide6.QtWidgets import QApplication
+                # If the launcher provided a message (e.g. terminal opened), show it briefly
+                if result.get('message'):
+                    msg_box = QMessageBox(self)
+                    msg_box.setWindowTitle("Installing Update")
+                    msg_box.setIcon(QMessageBox.Icon.Information)
+                    msg_box.setText(result['message'])
+                    msg_box.setStandardButtons(QMessageBox.StandardButton.Ok)
+                    msg_box.exec()
                 QApplication.quit()
             
             elif result['action'] == 'prepared':

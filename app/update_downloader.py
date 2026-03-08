@@ -569,37 +569,76 @@ del "%~f0"
             Result dictionary
         """
         if package_type == 'deb':
-            # Try pkexec first (graphical sudo prompt - fully automatic)
+            # Write terminal install script (used by pkexec and terminal fallback)
+            terminal_script = '/tmp/argo_deb_terminal.sh'
+            with open(terminal_script, 'w') as f:
+                f.write(f"""#!/bin/bash
+echo "Installing Argo Log Viewer update..."
+sudo dpkg -i "{file_path}"
+EXIT_CODE=$?
+if [ $EXIT_CODE -eq 0 ]; then
+    rm -f "{file_path}"
+    echo ""
+    echo "Installation complete! You can close this window."
+else
+    echo ""
+    echo "Installation failed (exit code $EXIT_CODE). Try: sudo dpkg -i {file_path}"
+fi
+rm -f "$0"
+read -p "Press Enter to close..."
+""")
+            os.chmod(terminal_script, 0o755)
+
+            # 1. Try pkexec (native Linux with polkit/GUI)
             if shutil.which('pkexec'):
                 try:
-                    logger.info(f"Launching DEB installer via pkexec: {file_path}")
-                    
-                    # Write a script that installs the DEB and then deletes it
-                    script_path = '/tmp/argo_deb_install.sh'
-                    with open(script_path, 'w') as f:
+                    logger.info(f"Trying pkexec for DEB install: {file_path}")
+                    pkexec_script = '/tmp/argo_deb_pkexec.sh'
+                    with open(pkexec_script, 'w') as f:
                         f.write(f"""#!/bin/bash
 pkexec dpkg -i "{file_path}"
 rm -f "{file_path}"
 rm -f "$0"
 """)
-                    os.chmod(script_path, 0o755)
-                    subprocess.Popen(['bash', script_path])
-                    
+                    os.chmod(pkexec_script, 0o755)
+                    subprocess.Popen(['bash', pkexec_script])
                     return {
                         'success': True,
                         'action': 'launched',
                         'needs_manual': False
                     }
-                    
                 except Exception as e:
-                    logger.warning(f"Could not launch graphical installer: {e}")
-            
-            # Fall back to showing command (no pkexec available)
+                    logger.warning(f"pkexec failed: {e}")
+
+            # 2. Try opening a terminal emulator (works in WSL GUI, GNOME, KDE, etc.)
+            terminal_candidates = [
+                ['x-terminal-emulator', '-e', f'bash {terminal_script}'],
+                ['gnome-terminal', '--', 'bash', terminal_script],
+                ['xfce4-terminal', '-e', f'bash {terminal_script}'],
+                ['konsole', '-e', f'bash {terminal_script}'],
+                ['xterm', '-e', f'bash {terminal_script}'],
+                ['lxterminal', '-e', f'bash {terminal_script}'],
+            ]
+            for cmd in terminal_candidates:
+                if shutil.which(cmd[0]):
+                    try:
+                        logger.info(f"Opening terminal {cmd[0]} for DEB install")
+                        subprocess.Popen(cmd)
+                        return {
+                            'success': True,
+                            'action': 'launched',
+                            'needs_manual': False,
+                            'message': 'A terminal window will open to install the update.\n\nEnter your password when prompted.\nThe .deb file will be deleted automatically.'
+                        }
+                    except Exception as e:
+                        logger.warning(f"Terminal {cmd[0]} failed: {e}")
+
+            # 3. Last resort — show manual command
             return {
                 'success': True,
                 'action': 'prepared',
-                'message': f'✓ Update downloaded to Downloads folder!\n\n'
-                          f'Run this command in terminal to install:\n\n'
+                'message': f'Update downloaded to your Downloads folder.\n\n'
+                          f'Run this command in a terminal to install:\n\n'
                           f'sudo dpkg -i {file_path}\n\n'
                           f'After installing, you can delete the .deb file.',
                 'needs_manual': True,
