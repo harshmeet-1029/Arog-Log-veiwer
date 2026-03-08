@@ -47,7 +47,7 @@ jobs:
       shell: bash
       run: |
         echo "📝 Generating build metadata for Windows Portable..."
-        cat > app/build_metadata.py << 'EOF'
+        cat > app/build_metadata.py << EOF
         """
         Build metadata - Auto-generated during build process.
         DO NOT EDIT MANUALLY.
@@ -89,7 +89,7 @@ jobs:
       shell: bash
       run: |
         echo "📝 Regenerating build metadata for Windows Installer..."
-        cat > app/build_metadata.py << 'EOF'
+        cat > app/build_metadata.py << EOF
         """
         Build metadata - Auto-generated during build process.
         DO NOT EDIT MANUALLY.
@@ -194,7 +194,7 @@ jobs:
     - name: Generate build metadata for macOS Apple Silicon
       run: |
         echo "📝 Generating build metadata for macOS Apple Silicon..."
-        cat > app/build_metadata.py << 'EOF'
+        cat > app/build_metadata.py << EOF
         """
         Build metadata - Auto-generated during build process.
         DO NOT EDIT MANUALLY.
@@ -279,7 +279,7 @@ jobs:
     - name: Build macOS Apple Silicon app (ZIP/Portable variant)
       run: |
         echo "📝 Regenerating build metadata for macOS ZIP..."
-        cat > app/build_metadata.py << 'EOF'
+        cat > app/build_metadata.py << EOF
         """
         Build metadata - Auto-generated during build process.
         DO NOT EDIT MANUALLY.
@@ -366,7 +366,7 @@ jobs:
     - name: Generate build metadata for Linux Portable
       run: |
         echo "📝 Generating build metadata for Linux Portable..."
-        cat > app/build_metadata.py << 'EOF'
+        cat > app/build_metadata.py << EOF
         """
         Build metadata - Auto-generated during build process.
         DO NOT EDIT MANUALLY.
@@ -401,7 +401,7 @@ jobs:
     - name: Create DEB package structure
       run: |
         echo "📝 Regenerating build metadata for Linux DEB..."
-        cat > app/build_metadata.py << 'EOF'
+        cat > app/build_metadata.py << EOF
         """
         Build metadata - Auto-generated during build process.
         DO NOT EDIT MANUALLY.
