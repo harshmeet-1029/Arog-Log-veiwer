@@ -416,6 +416,13 @@ class MainWindow(QWidget):
         self.auto_reconnect_action.setStatusTip("Automatically reconnect on connection loss")
         self.auto_reconnect_action.triggered.connect(self._toggle_auto_reconnect)
         settings_menu.addAction(self.auto_reconnect_action)
+
+        self.word_wrap_action = QAction("Word Wrap in Logs", self)
+        self.word_wrap_action.setCheckable(True)
+        self.word_wrap_action.setChecked(AppConfig.get_word_wrap())
+        self.word_wrap_action.setStatusTip("Wrap long lines in Console Output and Live Logs")
+        self.word_wrap_action.triggered.connect(self._toggle_word_wrap)
+        settings_menu.addAction(self.word_wrap_action)
         
         settings_menu.addSeparator()
         
@@ -565,7 +572,7 @@ class MainWindow(QWidget):
         # Console text area
         self.console_output = QTextEdit()
         self.console_output.setReadOnly(True)
-        self.console_output.setLineWrapMode(QTextEdit.WidgetWidth)
+        self.console_output.setLineWrapMode(QTextEdit.WidgetWidth if AppConfig.get_word_wrap() else QTextEdit.NoWrap)
         
         # Use monospace font for console
         console_font = QFont("Courier New", 9)
@@ -742,7 +749,7 @@ class MainWindow(QWidget):
         # Log output text area
         self.log_output = QTextEdit()
         self.log_output.setReadOnly(True)
-        self.log_output.setLineWrapMode(QTextEdit.WidgetWidth)
+        self.log_output.setLineWrapMode(QTextEdit.WidgetWidth if AppConfig.get_word_wrap() else QTextEdit.NoWrap)
         self.log_output.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.log_output.customContextMenuRequested.connect(self._show_log_context_menu)
         
@@ -1920,6 +1927,14 @@ class MainWindow(QWidget):
             f"Auto-reconnect {'enabled' if checked else 'disabled'}!\n\n"
             f"{'The app will automatically try to reconnect if the SSH connection is lost.' if checked else 'You will need to manually reconnect if the connection is lost.'}"
         )
+
+    def _toggle_word_wrap(self, checked: bool):
+        """Toggle word wrap in console and log panels (real-time, no restart needed)."""
+        AppConfig.set_word_wrap(checked)
+        mode = QTextEdit.WidgetWidth if checked else QTextEdit.NoWrap
+        self.console_output.setLineWrapMode(mode)
+        self.log_output.setLineWrapMode(mode)
+        logger.info(f"Word wrap {'enabled' if checked else 'disabled'}")
     
     def _reset_settings_to_defaults(self):
         """Reset all settings to default values with confirmation."""

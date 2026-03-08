@@ -417,6 +417,19 @@ class AppConfig:
         config = AppConfig.load_config()
         config['auto_reconnect'] = enabled
         AppConfig.save_config(config)
+
+    @staticmethod
+    def get_word_wrap() -> bool:
+        """Get whether word wrap is enabled in log/console panels."""
+        config = AppConfig.load_config()
+        return config.get('word_wrap', False)  # Default: off
+
+    @staticmethod
+    def set_word_wrap(enabled: bool) -> None:
+        """Set whether word wrap is enabled in log/console panels."""
+        config = AppConfig.load_config()
+        config['word_wrap'] = enabled
+        AppConfig.save_config(config)
     
     @staticmethod
     def get_installation_metadata() -> dict:
