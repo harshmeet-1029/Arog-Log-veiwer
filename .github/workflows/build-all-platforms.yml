@@ -523,8 +523,10 @@ jobs:
         #!/bin/bash
         set -e
         
-        # Kill running instances before removing
-        pkill -f argologviewer || true
+        # Kill running instances before removing.
+        # Use -x (exact name match) NOT -f (full cmdline match) — otherwise pkill
+        # would also kill the apt/dpkg process running this script.
+        pkill -x argologviewer || true
         sleep 1
         
         echo "Removing Argo Log Viewer..."
