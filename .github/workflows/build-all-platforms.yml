@@ -385,6 +385,7 @@ jobs:
         pyinstaller --name="ArgoLogViewer-Portable" \
           --onefile \
           --add-data="app:app" \
+          --add-data="app/ICON.png:." \
           --hidden-import=PySide6 \
           --hidden-import=paramiko \
           --hidden-import=cryptography \
@@ -440,25 +441,15 @@ jobs:
         cp dist/ArgoLogViewer-Installer ${DEBDIR}/usr/local/bin/argologviewer
         chmod +x ${DEBDIR}/usr/local/bin/argologviewer
         
-        # Create .desktop file
-        cat > ${DEBDIR}/usr/share/applications/argologviewer.desktop << 'EOF'
-        [Desktop Entry]
-        Version=1.0
-        Type=Application
-        Name=Argo Log Viewer
-        GenericName=Kubernetes Log Viewer
-        Comment=Professional desktop application for viewing Argo Workflow logs
-        Exec=/usr/local/bin/argologviewer
-        Icon=argologviewer
-        Terminal=false
-        StartupNotify=true
-        Categories=Development;Utility;Network;
-        Keywords=argo;kubernetes;logs;ssh;pods;workflow;
-        EOF
+        # Copy .desktop file from repo (app/argologviewer.desktop)
+        # Override Exec= to use the installed binary path
+        sed 's|^Exec=.*|Exec=/usr/local/bin/argologviewer|' \
+          app/argologviewer.desktop > ${DEBDIR}/usr/share/applications/argologviewer.desktop
         
         # Create AppStream metadata so app shows in GNOME Software with uninstall option
         mkdir -p ${DEBDIR}/usr/share/metainfo
-        cat > ${DEBDIR}/usr/share/metainfo/argologviewer.appdata.xml << 'EOF'
+        BUILD_DATE=$(date +%Y-%m-%d)
+        cat > ${DEBDIR}/usr/share/metainfo/argologviewer.appdata.xml << EOF
         <?xml version="1.0" encoding="UTF-8"?>
         <component type="desktop-application">
           <id>argologviewer.desktop</id>
@@ -470,7 +461,7 @@ jobs:
           <url type="homepage">https://github.com/harshmeet-1029/Arog-Log-veiwer</url>
           <developer_name>Harshmeet Singh</developer_name>
           <releases>
-            <release version="${VERSION}" date="$(date +%Y-%m-%d)" />
+            <release version="${VERSION}" date="${BUILD_DATE}" />
           </releases>
           <content_rating type="oars-1.1" />
         </component>

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Argo Log Viewer
+GenericName=Kubernetes Log Viewer
+Comment=View Argo Workflow pod logs via SSH
+Exec=argologviewer
+Icon=argologviewer
+Terminal=false
+StartupNotify=true
+Categories=Development;Utility;Network;
+Keywords=argo;kubernetes;logs;ssh;pods;workflow;
