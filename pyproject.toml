@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "argo-log-viewer"
-version = "1.0.0"
+version = "1.0.1"
 description = "Production-grade desktop GUI for viewing Argo Workflow logs via SSH"
 readme = "README.md"
 requires-python = ">=3.10"
