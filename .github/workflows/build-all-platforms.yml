@@ -830,16 +830,25 @@ jobs:
           1. Download `ArgoLogViewer-v${{ github.event.inputs.version }}-Linux-Installer.deb`
           2. Install: `sudo dpkg -i ArgoLogViewer-v${{ github.event.inputs.version }}-Linux-Installer.deb`
           3. Fix dependencies if needed: `sudo apt-get install -f`
-          4. Run: `argologviewer` (from anywhere)
-          5. Find in Applications menu
+          4. Run: `argologviewer` (from anywhere) or find it in your Applications menu
           
           **To Uninstall:** `sudo apt remove argologviewer`
           
+          > **Note:** The app's built-in "Check for Updates" button handles the entire update process automatically for DEB users.
+          
           **Option 2: Portable (All Linux distros)**
           1. Download `ArgoLogViewer-v${{ github.event.inputs.version }}-Linux-Portable`
-          2. Make executable: `chmod +x ArgoLogViewer-v${{ github.event.inputs.version }}-Linux-Portable`
-          3. Run: `./ArgoLogViewer-v${{ github.event.inputs.version }}-Linux-Portable`
-          4. Optional: Move to PATH: `sudo mv ArgoLogViewer-v${{ github.event.inputs.version }}-Linux-Portable /usr/local/bin/argologviewer`
+          2. Open a terminal in your Downloads folder and run:
+             ```bash
+             chmod +x ArgoLogViewer-v${{ github.event.inputs.version }}-Linux-Portable
+             ./ArgoLogViewer-v${{ github.event.inputs.version }}-Linux-Portable
+             ```
+          3. Optional: Move to PATH so you can run it from anywhere:
+             ```bash
+             sudo mv ArgoLogViewer-v${{ github.event.inputs.version }}-Linux-Portable /usr/local/bin/argologviewer
+             ```
+          
+          > **Important for Portable users:** Double-clicking the file in the file manager will show **"Could not Display - There is no app installed for Executable files"** — this is normal Linux security behavior. You **must** run it from a terminal using the commands above. Alternatively: right-click the file → **Properties** → **Permissions** → check **"Allow executing as program"**, then double-click it.
           
           ---
           ### ✅ Compatibility

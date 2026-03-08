@@ -113,18 +113,36 @@ argo-log-viewer/
 
 Download the latest release from [GitHub Releases](../../releases).
 
-**⚠️ macOS Users - IMPORTANT:** 
+**macOS Users - IMPORTANT:**
 - macOS will **BLOCK this app on first launch** (expected security warning)
 - **You MUST follow special steps to open it** - See: [macOS Installation Guide](MACOS_INSTALLATION.md)
 - **Quick Fix:** System Settings → Privacy & Security → Click "Open Anyway"
 - Or Terminal: `xattr -cr /Applications/ArgoLogViewer.app`
 
-**📋 NEW USERS: Follow these 5 steps exactly:**
-1. ✅ Download DMG → Install to Applications
-2. ✅ Try to open app (you'll see error) → Click "Done"
-3. ✅ **System Settings** → **Privacy & Security** → Scroll to **Security** section
-4. ✅ Click **"Open Anyway"** button
-5. ✅ Confirm → Done! App will now open normally forever
+**NEW USERS: Follow these 5 steps exactly:**
+1. Download DMG → Install to Applications
+2. Try to open app (you'll see error) → Click "Done"
+3. **System Settings** → **Privacy & Security** → Scroll to **Security** section
+4. Click **"Open Anyway"** button
+5. Confirm → Done! App will now open normally forever
+
+---
+
+**Linux Users - IMPORTANT (Portable):**
+
+> If you double-click the Portable binary in the file manager, you will see:
+> **"Could not Display - There is no app installed for Executable files"**
+> This is **normal Linux security behavior**, not a bug.
+
+You **must** launch it from a terminal:
+```bash
+chmod +x ArgoLogViewer-v*-Linux-Portable
+./ArgoLogViewer-v*-Linux-Portable
+```
+
+Or enable it in the file manager: right-click → **Properties** → **Permissions** → check **"Allow executing as program"** → then double-click.
+
+The **DEB package** (Installer) does not have this issue — it installs properly and appears in your Applications menu.
 
 ---
 
