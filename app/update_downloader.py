@@ -693,6 +693,7 @@ rm -f "$0"
                               f'How to run it:\n\n'
                               f'Option A - Terminal (recommended):\n'
                               f'  cd ~/Downloads\n'
+                              f'  chmod +x {file_name}\n'
                               f'  ./{file_name}\n\n'
                               f'Option B - File Manager:\n'
                               f'  Right-click the file\n'
