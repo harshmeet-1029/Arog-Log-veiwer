@@ -658,18 +658,20 @@ rm -f "$0"
                 chmod_done = False
             
             file_name = os.path.basename(file_path)
-            chmod_note = "" if chmod_done else f"\n\nFirst make it executable:\nchmod +x {file_name}"
             
             return {
                 'success': True,
                 'action': 'prepared',
-                'message': f'✓ Update ready!\n\n'
-                          f'Location: {file_path}\n\n'
-                          f'To run the new version:\n\n'
-                          f'1. Click OK to close this app\n'
-                          f'2. Open a terminal in your Downloads folder\n'
-                          f'3. Run: ./{file_name}'
-                          f'{chmod_note}',
+                'message': f'Update downloaded to:\n{file_path}\n\n'
+                          f'How to run it:\n\n'
+                          f'Option A - Terminal (recommended):\n'
+                          f'  cd ~/Downloads\n'
+                          f'  ./{file_name}\n\n'
+                          f'Option B - File Manager:\n'
+                          f'  Right-click the file\n'
+                          f'  Properties > Permissions\n'
+                          f'  Check "Allow executing as program"\n'
+                          f'  Then double-click to launch',
                 'needs_manual': True
             }
 

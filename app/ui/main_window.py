@@ -565,7 +565,7 @@ class MainWindow(QWidget):
         # Console text area
         self.console_output = QTextEdit()
         self.console_output.setReadOnly(True)
-        self.console_output.setLineWrapMode(QTextEdit.NoWrap)
+        self.console_output.setLineWrapMode(QTextEdit.WidgetWidth)
         
         # Use monospace font for console
         console_font = QFont("Courier New", 9)
@@ -742,7 +742,7 @@ class MainWindow(QWidget):
         # Log output text area
         self.log_output = QTextEdit()
         self.log_output.setReadOnly(True)
-        self.log_output.setLineWrapMode(QTextEdit.NoWrap)
+        self.log_output.setLineWrapMode(QTextEdit.WidgetWidth)
         self.log_output.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.log_output.customContextMenuRequested.connect(self._show_log_context_menu)
         

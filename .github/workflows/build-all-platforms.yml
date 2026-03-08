@@ -446,11 +446,34 @@ jobs:
         Version=1.0
         Type=Application
         Name=Argo Log Viewer
+        GenericName=Kubernetes Log Viewer
         Comment=Professional desktop application for viewing Argo Workflow logs
         Exec=/usr/local/bin/argologviewer
+        Icon=argologviewer
         Terminal=false
-        Categories=Development;Utility;
-        Keywords=argo;kubernetes;logs;ssh;
+        StartupNotify=true
+        Categories=Development;Utility;Network;
+        Keywords=argo;kubernetes;logs;ssh;pods;workflow;
+        EOF
+        
+        # Create AppStream metadata so app shows in GNOME Software with uninstall option
+        mkdir -p ${DEBDIR}/usr/share/metainfo
+        cat > ${DEBDIR}/usr/share/metainfo/argologviewer.appdata.xml << 'EOF'
+        <?xml version="1.0" encoding="UTF-8"?>
+        <component type="desktop-application">
+          <id>argologviewer.desktop</id>
+          <name>Argo Log Viewer</name>
+          <summary>View Argo Workflow pod logs via SSH</summary>
+          <description>
+            <p>Argo Log Viewer is a professional desktop application for viewing Argo Workflow logs via SSH. Features include real-time log streaming, pod search, resource monitoring, and Kubernetes operations.</p>
+          </description>
+          <url type="homepage">https://github.com/harshmeet-1029/Arog-Log-veiwer</url>
+          <developer_name>Harshmeet Singh</developer_name>
+          <releases>
+            <release version="${VERSION}" date="$(date +%Y-%m-%d)" />
+          </releases>
+          <content_rating type="oars-1.1" />
+        </component>
         EOF
         
         # Copy icon if exists
@@ -491,6 +514,11 @@ jobs:
           gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor || true
         fi
         
+        # Update AppStream cache so app shows in GNOME Software
+        if command -v appstreamcli > /dev/null 2>&1; then
+          appstreamcli refresh --force || true
+        fi
+        
         echo "Argo Log Viewer installed successfully!"
         echo "Run: argologviewer"
         
@@ -499,10 +527,14 @@ jobs:
         
         chmod +x ${DEBDIR}/DEBIAN/postinst
         
-        # Create prerm script (uninstaller actions)
+        # Create prerm script — kill any running instance before uninstall
         cat > ${DEBDIR}/DEBIAN/prerm << 'EOF'
         #!/bin/bash
         set -e
+        
+        # Kill running instances before removing
+        pkill -f argologviewer || true
+        sleep 1
         
         echo "Removing Argo Log Viewer..."
         
@@ -524,6 +556,11 @@ jobs:
         # Update icon cache
         if command -v gtk-update-icon-cache > /dev/null 2>&1; then
           gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor || true
+        fi
+        
+        # Refresh AppStream cache
+        if command -v appstreamcli > /dev/null 2>&1; then
+          appstreamcli refresh --force || true
         fi
         
         echo "Argo Log Viewer uninstalled successfully!"
