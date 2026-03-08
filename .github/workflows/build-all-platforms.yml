@@ -105,7 +105,7 @@ jobs:
     - name: Build Windows Installer executable (second build with installer metadata)
       run: |
         pyinstaller --name="ArgoLogViewer-Installer" `
-          --onefile `
+          --onedir `
           --windowed `
           --add-data="app;app" `
           --hidden-import=PySide6 `
@@ -115,7 +115,7 @@ jobs:
           --icon=app/icon.ico `
           --clean `
           app/main.py
-        echo "✅ Second build complete (installer metadata baked in)"
+        echo "✅ Second build complete (onedir, installer metadata baked in)"
     
     - name: Build Windows Installer
       run: |
