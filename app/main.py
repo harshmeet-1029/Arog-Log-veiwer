@@ -156,10 +156,21 @@ def _set_application_icon(app):
         else:
             logger.warning("Could not load application icon - file not found")
 
-        # On Linux portable builds, register a local .desktop file so GNOME
-        # shows the correct icon in the dock, taskbar, and file manager.
+        # On Linux portable builds, only register a .desktop file if the binary
+        # is in a stable system location (e.g. /usr/local/bin, /opt, ~/bin).
+        # Running from Downloads or /tmp is temporary — registering there causes
+        # a broken app launcher entry after the file is deleted/moved.
         if sys.platform.startswith('linux') and getattr(sys, 'frozen', False) and icon_path:
-            _register_linux_portable_icon(icon_path)
+            exe = sys.executable
+            stable_prefixes = ('/usr/', '/opt/', '/bin/', '/sbin/',
+                               os.path.expanduser('~/bin'),
+                               os.path.expanduser('~/.local/bin'))
+            if any(exe.startswith(p) for p in stable_prefixes):
+                _register_linux_portable_icon(icon_path)
+            else:
+                logger.info(
+                    f"Skipping .desktop registration — binary is not in a stable location: {exe}"
+                )
 
     except Exception as e:
         logger.error(f"Error setting application icon: {e}", exc_info=True)
