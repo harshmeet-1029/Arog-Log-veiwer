@@ -93,6 +93,10 @@ class MainWindow(QWidget):
         self._batch_timer = None  # Timer for batch processing
         self._search_cache_text = ""  # Cache for search optimization
         
+        # METRICS: Last known reading (shown when metrics stop/error)
+        self._last_metrics_cpu = ""
+        self._last_metrics_memory = ""
+
         # DISK BUFFERING: Optional disk streaming (only for unlimited mode)
         self._disk_buffering_enabled = False  # Only enable for unlimited logs
         self._disk_log_file = None  # Temp file handle for streaming logs
@@ -438,7 +442,7 @@ class MainWindow(QWidget):
         
         settings_menu.addSeparator()
         
-        reset_settings_action = QAction("⚠️ Reset to Defaults...", self)
+        reset_settings_action = QAction("Reset to Defaults...", self)
         reset_settings_action.setStatusTip("Reset all settings to default values")
         reset_settings_action.triggered.connect(self._reset_settings_to_defaults)
         settings_menu.addAction(reset_settings_action)
@@ -459,7 +463,7 @@ class MainWindow(QWidget):
         help_menu.addAction(shortcuts_action)
         
         # SSH Configuration Guide
-        ssh_config_action = QAction("🔧 SSH Configuration Guide", self)
+        ssh_config_action = QAction("SSH Configuration Guide", self)
         ssh_config_action.setStatusTip("View SSH setup instructions for your OS")
         ssh_config_action.triggered.connect(self._show_ssh_config_dialog)
         help_menu.addAction(ssh_config_action)
@@ -531,7 +535,7 @@ class MainWindow(QWidget):
         
         # Refresh button at top
         refresh_layout = QHBoxLayout()
-        self.refresh_btn = QPushButton("🔄 Refresh All Pods")
+        self.refresh_btn = QPushButton("↺ Refresh All Pods")
         self.refresh_btn.clicked.connect(self.refresh_pods)
         self.refresh_btn.setToolTip("Re-fetch all running pods from argo namespace")
         refresh_layout.addWidget(self.refresh_btn)
@@ -610,7 +614,7 @@ class MainWindow(QWidget):
         header_layout.addWidget(self.metrics_label)
         
         # Retry button for metrics (compact, next to metrics)
-        self.retry_metrics_btn = QPushButton("🔄")
+        self.retry_metrics_btn = QPushButton("↺")
         self.retry_metrics_btn.setToolTip("Start/Refresh Metrics")
         self.retry_metrics_btn.setFixedSize(32, 28)  # Fixed size to prevent cutting
         self.retry_metrics_btn.setStyleSheet("""
@@ -627,7 +631,7 @@ class MainWindow(QWidget):
         self.retry_metrics_btn.clicked.connect(self.retry_metrics)
         header_layout.addWidget(self.retry_metrics_btn)
         # Stop metrics button (visible only while metrics are fetching)
-        self.stop_metrics_btn = QPushButton("⏹")
+        self.stop_metrics_btn = QPushButton("■")
         self.stop_metrics_btn.setToolTip("Stop metrics")
         self.stop_metrics_btn.setFixedSize(32, 28)
         self.stop_metrics_btn.setStyleSheet("""
@@ -647,7 +651,7 @@ class MainWindow(QWidget):
         header_layout.addStretch()
         
         # Fullscreen button
-        self.fullscreen_btn = QPushButton("⛶ Fullscreen")
+        self.fullscreen_btn = QPushButton("[ ] Fullscreen")
         self.fullscreen_btn.setToolTip("Enter fullscreen mode (Logs only)")
         self.fullscreen_btn.clicked.connect(self.toggle_fullscreen)
         self.fullscreen_btn.setMinimumWidth(120)
@@ -778,7 +782,7 @@ class MainWindow(QWidget):
         clear_logs_btn.clicked.connect(lambda: self.log_output.clear())
         button_layout.addWidget(clear_logs_btn)
         
-        self.save_logs_btn = QPushButton("💾 Save Logs")
+        self.save_logs_btn = QPushButton("Save Logs")
         self.save_logs_btn.clicked.connect(self.save_logs_to_file)
         self.save_logs_btn.setToolTip("Save logs to a text file")
         self.save_logs_btn.setVisible(False)  # Hidden by default
@@ -805,8 +809,7 @@ class MainWindow(QWidget):
         self.save_logs_btn.setVisible(False)
         self.metrics_label.setVisible(False)
         self.metrics_label.clear()
-        self.retry_metrics_btn.setVisible(False)
-        self.stop_metrics_btn.setVisible(False)
+        self._set_metrics_btns_visible(False, False)
         self.status_label.setText("● Disconnected")
         self.status_label.setStyleSheet("color: red; font-weight: bold; font-size: 11pt;")
     
@@ -831,7 +834,7 @@ class MainWindow(QWidget):
         self.log_output.clear()
         self.metrics_label.clear()
         self.metrics_label.setVisible(False)
-        self.retry_metrics_btn.setVisible(False)
+        self._set_metrics_btns_visible(False, False)
         self.current_pod_for_metrics = None
         self.current_pod_label.setText("No pod selected")
     
@@ -1056,10 +1059,15 @@ class MainWindow(QWidget):
         self.fullscreen_btn.setVisible(True)
         self.save_logs_btn.setVisible(True)
         
+        # Reset last known metrics so stale data from previous pod doesn't show
+        self._last_metrics_cpu = ""
+        self._last_metrics_memory = ""
+
         # Show metrics label and retry button, but DO NOT auto-start
         # User must click refresh to start metrics (CRASH PROOFING)
         self.metrics_label.setVisible(True)
-        self.metrics_label.setText("│ 📊 Click Refresh to load metrics")
+        self.metrics_label.setText("│ Click Refresh to load metrics")
+        self.metrics_label.setToolTip("")
         self.retry_metrics_btn.setVisible(True)
         
         logger.info("Starting logs worker")
@@ -1120,8 +1128,21 @@ class MainWindow(QWidget):
                 self.worker.terminate()
                 self.worker.wait()
             
-        # Stop metrics monitoring (and hide UI)
-        self.stop_metrics_monitoring(hide_ui=True)
+        # Freeze last metrics reading before stopping (so user sees final values)
+        if self._last_metrics_cpu:
+            frozen_text = f"│ CPU: {self._last_metrics_cpu} • Memory: {self._last_metrics_memory}  (stopped)"
+            frozen_tip = "Final reading — metrics stopped when log stream ended"
+            self.metrics_label.setText(frozen_text)
+            self.metrics_label.setToolTip(frozen_tip)
+            self.metrics_label.setVisible(True)
+            if self.is_fullscreen and hasattr(self, 'fullscreen_metrics_label'):
+                self.fullscreen_metrics_label.setText(frozen_text)
+                self.fullscreen_metrics_label.setToolTip(frozen_tip)
+
+        # Stop metrics monitoring; keep label if we have a last reading, else hide all
+        self.stop_metrics_monitoring(hide_ui=not self._last_metrics_cpu)
+        if self._last_metrics_cpu:
+            self._set_metrics_btns_visible(False, False)
         
         # Close disk buffer (keeps file for potential save)
         self._close_disk_buffer()
@@ -1133,8 +1154,7 @@ class MainWindow(QWidget):
         # Hide metrics and retry/stop buttons
         self.metrics_label.setVisible(False)
         self.metrics_label.clear()
-        self.retry_metrics_btn.setVisible(False)
-        self.stop_metrics_btn.setVisible(False)
+        self._set_metrics_btns_visible(False, False)
         
         # Reset stream tracking (flag already cleared at start)
         self._stream_start_time = None
@@ -1162,7 +1182,7 @@ class MainWindow(QWidget):
             logger.warning(f"Metrics SSH connection not available ({reason})")
             self.console_output.append(f"[WARNING] Metrics connection unavailable ({reason}). Attempting to reconnect...\n")
             
-            self.metrics_label.setText("│ 🔄 Reconnecting metrics...")
+            self.metrics_label.setText("│ Reconnecting metrics...")
             self.metrics_label.setToolTip("Re-establishing metrics connection...")
             self.metrics_label.setVisible(True)
             self.retry_metrics_btn.setVisible(False)
@@ -1180,8 +1200,8 @@ class MainWindow(QWidget):
             
             # Show fetching state
             self.metrics_label.setVisible(True)
-            self.retry_metrics_btn.setVisible(True)
-            self.metrics_label.setText("│ 📊 Fetching...")
+            self.metrics_label.setText("│ Fetching...")
+            self._set_metrics_btns_visible(True, False)
             
             # Create and start worker for metrics (using SEPARATE SSH connection)
             self.metrics_worker = ArgoWorker(
@@ -1194,16 +1214,16 @@ class MainWindow(QWidget):
             self.metrics_worker.finished.connect(self._on_metrics_worker_finished)
             
             self.is_monitoring_metrics = True
-            self.stop_metrics_btn.setVisible(True)
+            self._set_metrics_btns_visible(True, True)
             
             logger.info("Starting metrics worker (on separate SSH connection)")
             self.metrics_worker.start()
             
         except Exception as e:
             logger.error(f"Failed to start metrics monitoring (logs unaffected): {e}", exc_info=True)
-            self.metrics_label.setText("│ [!] Metrics unavailable")
+            self.metrics_label.setText("│ Metrics unavailable")
             self.is_monitoring_metrics = False
-            self.stop_metrics_btn.setVisible(False)
+            self._set_metrics_btns_visible(False, False)
     
     def stop_metrics_monitoring(self, hide_ui=False):
         """
@@ -1235,16 +1255,13 @@ class MainWindow(QWidget):
         try:
             if hide_ui:
                 self.metrics_label.setVisible(False)
-                self.retry_metrics_btn.setVisible(False)
-                self.stop_metrics_btn.setVisible(False)
                 self.metrics_label.clear()
-                # Clear fullscreen metrics if exists
                 if hasattr(self, 'fullscreen_metrics_label'):
                     self.fullscreen_metrics_label.clear()
+                self._set_metrics_btns_visible(False, False)
             else:
-                self.metrics_label.setText("│ 📊 Click Refresh to load metrics")
-                self.retry_metrics_btn.setVisible(True)
-                self.stop_metrics_btn.setVisible(False)
+                self.metrics_label.setText("│ Click Refresh to load metrics")
+                self._set_metrics_btns_visible(True, False)
         except:
             pass
     
@@ -1253,13 +1270,23 @@ class MainWindow(QWidget):
         if self.sender() is not getattr(self, "metrics_worker", None):
             return
         self.is_monitoring_metrics = False
-        self.stop_metrics_btn.setVisible(False)
-    
+        self._set_metrics_btns_visible(self.retry_metrics_btn.isVisible(), False)
+
     def _stop_metrics_clicked(self):
         """Stop fetching metrics; last value stays visible until next refresh."""
         logger.info("User requested to stop metrics")
         self.stop_metrics_monitoring(hide_ui=False)
     
+    def _set_metrics_btns_visible(self, retry: bool, stop: bool):
+        """Set visibility of metrics buttons in both main window and fullscreen header."""
+        self.retry_metrics_btn.setVisible(retry)
+        self.stop_metrics_btn.setVisible(stop)
+        if self.is_fullscreen:
+            if hasattr(self, 'fullscreen_retry_btn'):
+                self.fullscreen_retry_btn.setVisible(retry)
+            if hasattr(self, 'fullscreen_stop_btn'):
+                self.fullscreen_stop_btn.setVisible(stop)
+
     def retry_metrics(self):
         """Manually start or retry fetching metrics for the current pod."""
         if not self.current_pod_for_metrics:
@@ -1272,7 +1299,7 @@ class MainWindow(QWidget):
         # Stop existing metrics monitoring and restart
         self.stop_metrics_monitoring()
         
-        self.metrics_label.setText("│ 🔄 Starting metrics...")
+        self.metrics_label.setText("│ Starting metrics...")
         
         # Restart metrics monitoring
         from PySide6.QtCore import QTimer
@@ -1329,18 +1356,28 @@ class MainWindow(QWidget):
                 # If we didn't find a match, it might be old data for a previous pod. Ignore it.
                 return
 
+            # Store last known reading so it can be shown after error/stop
+            self._last_metrics_cpu = cpu_usage
+            self._last_metrics_memory = memory_usage
+
             # Ultra-compact display format
-            metrics_text = f"│ 📊 CPU: {cpu_usage} • Memory: {memory_usage}"
+            metrics_text = f"│ CPU: {cpu_usage} • Memory: {memory_usage}"
             self.metrics_label.setText(metrics_text)
-            
+            self.metrics_label.setToolTip("")
+
             # Update fullscreen metrics if active
             if self.is_fullscreen and hasattr(self, 'fullscreen_metrics_label'):
                 self.fullscreen_metrics_label.setText(metrics_text)
+                self.fullscreen_metrics_label.setToolTip("")
                 
         except Exception as e:
             logger.error(f"Error updating metrics display: {e}", exc_info=True)
             try:
-                self.metrics_label.setText("│ ⚠️ Metrics error")
+                if self._last_metrics_cpu:
+                    self.metrics_label.setText(f"│ CPU: {self._last_metrics_cpu} • Memory: {self._last_metrics_memory}  (error)")
+                    self.metrics_label.setToolTip(f"Last reading shown. Error: {e}")
+                else:
+                    self.metrics_label.setText("│ Metrics error")
             except:
                 pass  # Fail silently
     
@@ -1356,17 +1393,30 @@ class MainWindow(QWidget):
                 return
             logger.warning(f"Metrics worker error (logs unaffected): {error_msg}")
             
-            # User-friendly error message
-            if "Metrics API not available" in error_msg or "Metrics server not available" in error_msg:
-                self.metrics_label.setText("│ ⚠️ Metrics server not installed")
-                self.metrics_label.setToolTip("Install metrics-server in cluster for resource monitoring. Logs are working normally.")
+            # Show last known reading with error note, or generic message
+            if self._last_metrics_cpu:
+                self.metrics_label.setText(f"│ CPU: {self._last_metrics_cpu} • Memory: {self._last_metrics_memory}  (unavailable)")
+                if "Metrics API not available" in error_msg or "Metrics server not available" in error_msg:
+                    self.metrics_label.setToolTip("Last reading shown. Metrics server not installed in cluster.")
+                else:
+                    self.metrics_label.setToolTip(f"Last reading shown. Error: {error_msg}")
             else:
-                self.metrics_label.setText("│ [!] Metrics unavailable")
-                self.metrics_label.setToolTip(f"Error: {error_msg}. Logs are working normally.")
-            
+                if "Metrics API not available" in error_msg or "Metrics server not available" in error_msg:
+                    self.metrics_label.setText("│ Metrics server not installed")
+                    self.metrics_label.setToolTip("Install metrics-server in cluster for resource monitoring.")
+                else:
+                    self.metrics_label.setText("│ Metrics unavailable")
+                    self.metrics_label.setToolTip(f"Error: {error_msg}")
+
             self.is_monitoring_metrics = False
-            self.stop_metrics_btn.setVisible(False)
-            
+            # Show retry so the user can try again; hide stop (nothing is running)
+            self._set_metrics_btns_visible(True, False)
+
+            # Keep fullscreen label in sync
+            if self.is_fullscreen and hasattr(self, 'fullscreen_metrics_label'):
+                self.fullscreen_metrics_label.setText(self.metrics_label.text())
+                self.fullscreen_metrics_label.setToolTip(self.metrics_label.toolTip())
+
         except Exception as e:
             logger.error(f"Error in _on_metrics_error: {e}", exc_info=True)
     
@@ -1746,7 +1796,7 @@ class MainWindow(QWidget):
         if limit > 0:
             warning_html = f"""
             <div class="warning">
-                <strong>⚠️ Limited Mode Active:</strong> Only the most recent {limit} lines were saved. 
+                <strong>Limited Mode Active:</strong> Only the most recent {limit} lines were saved. 
                 Older logs were discarded to save memory. 
                 Switch to 'Unlimited' mode in Settings to capture full history.
             </div>
@@ -1858,7 +1908,7 @@ class MainWindow(QWidget):
         cursor = self.log_output.textCursor()
         has_selection = cursor.hasSelection()
         
-        copy_action = menu.addAction("📋 Copy")
+        copy_action = menu.addAction("Copy")
         copy_action.setEnabled(has_selection)
         copy_action.triggered.connect(lambda: self.log_output.copy())
         
@@ -1877,7 +1927,7 @@ class MainWindow(QWidget):
         menu.addSeparator()
         
         # Save option
-        save_action = menu.addAction("💾 Save Logs...")
+        save_action = menu.addAction("Save Logs...")
         save_action.triggered.connect(self.save_logs_to_file)
         
         # Show menu at cursor position
@@ -2008,7 +2058,7 @@ class MainWindow(QWidget):
             
             # SET FULLSCREEN FLAG FIRST (before any events can fire)
             self.is_fullscreen = True
-            self.fullscreen_btn.setText("⛶ Exit Fullscreen")
+            self.fullscreen_btn.setText("[ ] Exit Fullscreen")
             
             # Store original parent
             self.original_parent = self.log_container.parent()
@@ -2043,9 +2093,36 @@ class MainWindow(QWidget):
                 metrics_color = "#212121"
             fullscreen_metrics_label.setStyleSheet(f"color: {metrics_color}; font-size: 11pt; margin-left: 15px; font-weight: bold;")
             fullscreen_metrics_label.setVisible(self.metrics_label.isVisible())
+            fullscreen_metrics_label.setToolTip(self.metrics_label.toolTip())
             header_layout.addWidget(fullscreen_metrics_label)
             self.fullscreen_metrics_label = fullscreen_metrics_label
-            
+
+            # Refresh metrics button (mirrors main window retry_metrics_btn exactly)
+            fs_retry_btn = QPushButton("↺")
+            fs_retry_btn.setToolTip("Start/Refresh Metrics")
+            fs_retry_btn.setFixedSize(32, 28)
+            fs_retry_btn.setStyleSheet("""
+                QPushButton { font-size: 16px; padding: 0px; border-radius: 4px; }
+                QPushButton:hover { background-color: rgba(255,255,255,0.1); }
+            """)
+            fs_retry_btn.setVisible(self.retry_metrics_btn.isVisible())
+            fs_retry_btn.clicked.connect(self.retry_metrics)
+            header_layout.addWidget(fs_retry_btn)
+            self.fullscreen_retry_btn = fs_retry_btn
+
+            # Stop metrics button (mirrors main window stop_metrics_btn)
+            fs_stop_btn = QPushButton("■")
+            fs_stop_btn.setToolTip("Stop metrics")
+            fs_stop_btn.setFixedSize(32, 28)
+            fs_stop_btn.setStyleSheet("""
+                QPushButton { font-size: 16px; padding: 0px; border-radius: 4px; }
+                QPushButton:hover { background-color: rgba(255,255,255,0.1); }
+            """)
+            fs_stop_btn.setVisible(self.stop_metrics_btn.isVisible())
+            fs_stop_btn.clicked.connect(self._stop_metrics_clicked)
+            header_layout.addWidget(fs_stop_btn)
+            self.fullscreen_stop_btn = fs_stop_btn
+
             header_layout.addStretch()
             
             exit_fullscreen_btn = QPushButton("✕ Exit Fullscreen")
@@ -2126,14 +2203,14 @@ class MainWindow(QWidget):
             
             # Update state
             self.is_fullscreen = False
-            self.fullscreen_btn.setText("⛶ Fullscreen")
+            self.fullscreen_btn.setText("[ ] Fullscreen")
             logger.info("Successfully exited fullscreen mode")
             
         except Exception as e:
             logger.error(f"Error exiting fullscreen: {e}")
             # Ensure state is reset even if there was an error
             self.is_fullscreen = False
-            self.fullscreen_btn.setText("⛶ Fullscreen")
+            self.fullscreen_btn.setText("[ ] Fullscreen")
     
     def _connect_metrics_ssh(self):
         """Establish a separate SSH connection for metrics."""
@@ -2176,8 +2253,8 @@ class MainWindow(QWidget):
                     
                     # If user was waiting for metrics (reconnecting), show success
                     if "Reconnecting" in self.metrics_label.text():
-                        self.metrics_label.setText("│ 📊 Click Refresh to load metrics")
-                        self.retry_metrics_btn.setVisible(True)
+                        self.metrics_label.setText("│ Click Refresh to load metrics")
+                        self._set_metrics_btns_visible(True, False)
             
             self.metrics_connection_worker.finished.connect(on_metrics_connection_complete)
             self.metrics_connection_worker.start()
@@ -2231,7 +2308,7 @@ class MainWindow(QWidget):
             self.fetch_btn.setEnabled(True)
             self.fetch_btn.setText("Search Pods")
             self.refresh_btn.setEnabled(True)
-            self.refresh_btn.setText("🔄 Refresh All Pods")
+            self.refresh_btn.setText("↺ Refresh All Pods")
             
             if not pods:
                 QMessageBox.information(self, "No Results", "No pods found matching the search keyword")
@@ -2245,7 +2322,7 @@ class MainWindow(QWidget):
             
             # Reset refreshing state if applicable
             self.refresh_btn.setEnabled(self.is_connected)
-            self.refresh_btn.setText("🔄 Refresh All Pods")
+            self.refresh_btn.setText("↺ Refresh All Pods")
             
             # Check if this is an SSH connection error
             is_ssh_error = any(keyword in error_msg.lower() for keyword in 
@@ -2265,7 +2342,7 @@ class MainWindow(QWidget):
                 logger.info(f"Auto-reconnect attempt {self.reconnect_attempts}/{self.max_reconnect_attempts}")
                 
                 # Show notification instead of error dialog
-                self.console_output.append(f"\n⚠️ Connection lost. Auto-reconnecting ({self.reconnect_attempts}/{self.max_reconnect_attempts})...\n")
+                self.console_output.append(f"\n[!] Connection lost. Auto-reconnecting ({self.reconnect_attempts}/{self.max_reconnect_attempts})...\n")
                 
                 # Schedule reconnect after 3 seconds
                 if self.reconnect_timer:
@@ -2288,14 +2365,14 @@ class MainWindow(QWidget):
             self.fetch_btn.setEnabled(self.is_connected)
             self.fetch_btn.setText("Fetch Pods")
             self.refresh_btn.setEnabled(self.is_connected)
-            self.refresh_btn.setText("🔄 Refresh All Pods")
+            self.refresh_btn.setText("↺ Refresh All Pods")
         except Exception as e:
             logger.error(f"Error in _on_error handler: {e}", exc_info=True)
     
     def _attempt_reconnect(self):
         """Attempt to reconnect to SSH."""
         logger.info("Attempting to reconnect...")
-        self.console_output.append("🔄 Reconnecting...\n")
+        self.console_output.append("Reconnecting...\n")
         
         # Mark as disconnected first
         self.is_connected = False
@@ -2420,17 +2497,17 @@ class MainWindow(QWidget):
                 
                 # WARN USER: Limited mode does not save history!
                 self.console_output.append(
-                    f"\n⚠️ WARNING: Limited Mode Active ({log_limit} lines).\n"
-                    "   • Only the most recent {log_limit} lines are kept.\n"
+                    f"\n[!] WARNING: Limited Mode Active ({log_limit:,} lines).\n"
+                    f"   • Only the most recent {log_limit:,} lines are kept.\n"
                     "   • Older logs are DELETED permanently to save RAM.\n"
                     "   • 'Save Logs' will only save what is currently visible.\n"
-                    "   • To save EVERYTHING, switch to 'Unlimited' in Settings > Advanced.\n"
+                    "   • To keep everything, switch to Unlimited in Settings → Advanced Settings.\n"
                 )
                 return
             
-            # UNLIMITED MODE: Enable disk buffering
+            # UNLIMITED MODE: disk buffering is always on — proceed with file setup
+            self.log_output.document().setMaximumBlockCount(0)  # Remove UI line cap
             self._disk_buffering_enabled = True
-            self.log_output.document().setMaximumBlockCount(0)  # Remove UI limit
             
             # Check available disk space before creating file
             temp_dir = Path(tempfile.gettempdir()) / "argo_log_viewer_buffers"
@@ -2616,8 +2693,8 @@ class MainWindow(QWidget):
                 QMessageBox.information(self, "All Loaded", "All logs are already loaded.")
                 return
             
-            # Warn for huge logs
-            if total_lines > 100000:
+            # Warn for huge logs (threshold matches the configurable UI trim threshold)
+            if total_lines > AppConfig.get_ui_trim_threshold():
                 file_size_mb = self._disk_log_path.stat().st_size / 1024 / 1024
                 reply = QMessageBox.question(
                     self,
@@ -2755,7 +2832,7 @@ class MainWindow(QWidget):
             logger.error(f"Error appending log: {e}", exc_info=True)
             # Try to at least show the error
             try:
-                self.log_output.append(f"\n⚠️ [Log Error: {str(e)}]\n")
+                self.log_output.append(f"\n[!] Log Error: {str(e)}\n")
             except:
                 pass  # Fail silently to prevent cascading crashes
     
@@ -2801,9 +2878,19 @@ class MainWindow(QWidget):
                     self._disk_buffer_ram_cache.append(combined_text)
                     lines_written = combined_text.count('\n')
                     self._disk_log_lines_count += lines_written
-                    
+
+                    # Check user-defined line limit (0 = unlimited)
+                    disk_line_limit = AppConfig.get_disk_buffer_limit()
+                    if disk_line_limit > 0 and self._disk_log_lines_count >= disk_line_limit:
+                        logger.info(f"Disk buffer line limit reached ({disk_line_limit:,}) — stopping disk writes")
+                        self._close_disk_buffer()
+                        self._disk_buffering_enabled = False
+                        if hasattr(self, 'current_pod_label'):
+                            current_text = self.current_pod_label.text().split("│")[0].strip()
+                            self.current_pod_label.setText(f"{current_text} │ Disk limit: {disk_line_limit:,} lines saved")
+
                     # Only write to disk when RAM cache is full (reduces writes!)
-                    if len(self._disk_buffer_ram_cache) >= self._disk_buffer_cache_size:
+                    elif len(self._disk_buffer_ram_cache) >= self._disk_buffer_cache_size:
                         # Check file size before writing (prevent huge files!)
                         current_size = self._disk_log_path.stat().st_size if self._disk_log_path.exists() else 0
                         
@@ -2815,7 +2902,7 @@ class MainWindow(QWidget):
                             # Notify user
                             if hasattr(self, 'current_pod_label'):
                                 current_text = self.current_pod_label.text().split("│")[0].strip()
-                                self.current_pod_label.setText(f"{current_text} │ ⚠️ Disk limit reached ({self._disk_log_lines_count:,} lines saved)")
+                                self.current_pod_label.setText(f"{current_text} │ [!] Disk limit reached ({self._disk_log_lines_count:,} lines saved)")
                         else:
                             # Combine cache and write to disk
                             cached_text = "".join(self._disk_buffer_ram_cache)
@@ -2854,10 +2941,11 @@ class MainWindow(QWidget):
                 # Update UI end line tracker (what's the last line shown?)
                 self._ui_end_line = self._disk_log_lines_count
                 
-                # Trim if UI has too many lines (Option B: 100k limit for better UX)
-                if doc.blockCount() > 100000:
-                    lines_to_trim = 10000
-                    logger.info(f"UI at 100k lines, trimming {lines_to_trim:,} oldest (keeping newest 90k). Total on disk: {self._disk_log_lines_count:,}")
+                # Trim if UI has too many lines (threshold is user-configurable, max 100 000)
+                _ui_trim_threshold = AppConfig.get_ui_trim_threshold()
+                if doc.blockCount() > _ui_trim_threshold:
+                    lines_to_trim = max(1000, _ui_trim_threshold // 10)
+                    logger.info(f"UI at {_ui_trim_threshold:,} lines, trimming {lines_to_trim:,} oldest. Total on disk: {self._disk_log_lines_count:,}")
                     
                     # Remove oldest lines from UI (keeps newest)
                     cursor.movePosition(QTextCursor.MoveOperation.Start)
@@ -2882,7 +2970,7 @@ class MainWindow(QWidget):
                     if hasattr(self, 'current_pod_label'):
                         current_text = self.current_pod_label.text().split("│")[0].strip()
                         self.current_pod_label.setText(
-                            f"{current_text} │ 💾 {self._disk_log_lines_count:,} lines total "
+                            f"{current_text} │ {self._disk_log_lines_count:,} lines on disk "
                             f"(showing {self._ui_start_line + 1:,}-{self._ui_end_line:,})"
                         )
             
@@ -3763,21 +3851,9 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
         # Get current metadata
         metadata = AppConfig.get_installation_metadata()
         
-        # Get app version from build_metadata or metadata
-        app_version = metadata.get('version', 'Unknown')
-        if app_version == 'Unknown':
-            try:
-                from app import build_metadata
-                app_version = build_metadata.VERSION
-            except:
-                try:
-                    import tomllib
-                    with open('pyproject.toml', 'rb') as f:
-                        pyproject = tomllib.load(f)
-                        app_version = pyproject['project']['version']
-                except:
-                    app_version = 'Unknown'
-        
+        # Get app version — use UpdateConfig as the single source of truth
+        app_version = metadata.get('version') or UpdateConfig.get_current_version()
+
         # Build info message
         platform = metadata.get('platform', 'Unknown')
         package_type = metadata.get('package_type', 'Unknown')
@@ -3883,7 +3959,7 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
         
         if update_info.is_critical:
             msg_box.setIcon(QMessageBox.Icon.Warning)
-            msg_box.setText(f"⚠️ Critical Update Available: v{update_info.version}")
+            msg_box.setText(f"Critical Update Available: v{update_info.version}")
         else:
             msg_box.setText(f"Update Available: v{update_info.version}")
         
@@ -3936,7 +4012,7 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
         
         # Title
         if update_info.is_critical:
-            title_label = QLabel(f"⚠️ Critical Update Available")
+            title_label = QLabel(f"Critical Update Available")
             title_label.setStyleSheet("color: orange; font-weight: bold; font-size: 14pt;")
         else:
             title_label = QLabel(f"New Version Available: v{update_info.version}")
@@ -4223,13 +4299,24 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
             if result['action'] == 'launched':
                 logger.info("Installer launched, exiting app now")
                 from PySide6.QtWidgets import QApplication
-                # If the launcher provided a message (e.g. terminal opened), show it briefly
+                from PySide6.QtCore import QTimer
                 if result.get('message'):
+                    # e.g. Linux terminal opened — user needs to read and confirm
                     msg_box = QMessageBox(self)
                     msg_box.setWindowTitle("Installing Update")
                     msg_box.setIcon(QMessageBox.Icon.Information)
                     msg_box.setText(result['message'])
                     msg_box.setStandardButtons(QMessageBox.StandardButton.Ok)
+                    msg_box.exec()
+                else:
+                    # Auto-install (macOS): show a 2-second non-interactive notice
+                    # so the user knows why the app is closing, then quit immediately.
+                    msg_box = QMessageBox(self)
+                    msg_box.setWindowTitle("Installing Update")
+                    msg_box.setIcon(QMessageBox.Icon.Information)
+                    msg_box.setText("Installing update...\n\nThe app will close now and relaunch automatically.")
+                    msg_box.setStandardButtons(QMessageBox.StandardButton.NoButton)
+                    QTimer.singleShot(2000, msg_box.accept)
                     msg_box.exec()
                 QApplication.quit()
             
@@ -4366,7 +4453,7 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
         
         # Warning label for limited mode
         self.warning_label = QLabel(
-            "⚠️ <b>Warning:</b> Older logs will be permanently deleted to save memory.<br>"
+            "<b>Warning:</b> Older logs will be permanently deleted to save memory.<br>"
             "Only the most recent lines will be kept."
         )
         self.warning_label.setStyleSheet("color: #ff9800; font-size: 9pt; margin-top: 5px;")
@@ -4408,7 +4495,74 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
         
         warnings_group.setLayout(warnings_layout)
         layout.addWidget(warnings_group)
-        
+
+        # Disk Buffering (only relevant in Unlimited log mode)
+        disk_limit_group = QGroupBox("Scroll-back && Full Save  (Unlimited mode only)")
+        disk_limit_layout = QVBoxLayout()
+
+        disk_context_label = QLabel(
+            "Logs are automatically saved to a temporary file so you can "
+            "<b>scroll back to older lines</b> and <b>save the full session</b> at any time. "
+            "The file is deleted automatically when you switch pods or close the app."
+        )
+        disk_context_label.setWordWrap(True)
+        disk_context_label.setStyleSheet("font-size: 9pt; margin-bottom: 6px;")
+        disk_limit_layout.addWidget(disk_context_label)
+
+        # ── Single question: after how many lines should older lines go to disk? ──
+        trim_options_widget = QWidget()
+        trim_options_layout = QVBoxLayout(trim_options_widget)
+        trim_options_layout.setContentsMargins(0, 4, 0, 0)
+        trim_options_layout.setSpacing(6)
+
+        trim_question = QLabel("Move older lines to disk after:")
+        trim_question.setStyleSheet("font-weight: bold;")
+        trim_options_layout.addWidget(trim_question)
+
+        current_trim = AppConfig.get_ui_trim_threshold()
+
+        trim_default_radio = QRadioButton("Default  —  100,000 lines  (recommended)")
+        trim_default_radio.setChecked(current_trim == 100_000)
+        trim_options_layout.addWidget(trim_default_radio)
+
+        trim_custom_radio = QRadioButton("Custom:")
+        trim_custom_radio.setChecked(current_trim != 100_000)
+        trim_options_layout.addWidget(trim_custom_radio)
+
+        trim_spin = QSpinBox()
+        trim_spin.setMinimum(100)
+        trim_spin.setMaximum(100000)
+        trim_spin.setSingleStep(10000)
+        # If default is active, pre-fill the spinbox with 50,000 so switching
+        # to Custom gives a meaningful starting point rather than the bare minimum.
+        trim_spin.setValue(current_trim if current_trim != 100_000 else 50_000)
+        trim_spin.setSuffix(" lines")
+        trim_spin.setEnabled(current_trim != 100_000)
+        trim_options_layout.addWidget(trim_spin)
+
+        trim_custom_radio.toggled.connect(trim_spin.setEnabled)
+
+        trim_note = QLabel(
+            "<small>"
+            "Once this limit is reached, the oldest lines are moved to disk — use "
+            "<b>Load Older</b> to bring them back. "
+            "Lower value = less RAM used, but \u201cLoad Older\u201d appears more often. "
+            "Min: 100 \u2022 Max: 100,000."
+            "</small>"
+        )
+        trim_note.setWordWrap(True)
+        trim_note.setStyleSheet("color: #888888; margin-top: 4px;")
+        trim_options_layout.addWidget(trim_note)
+
+        disk_limit_layout.addWidget(trim_options_widget)
+
+        disk_limit_group.setLayout(disk_limit_layout)
+        layout.addWidget(disk_limit_group)
+
+        # Hide entire group when Log Buffer is Limited
+        disk_limit_group.setVisible(unlimited_radio.isChecked())
+        unlimited_radio.toggled.connect(disk_limit_group.setVisible)
+
         # Buttons
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | 
@@ -4419,7 +4573,11 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
         layout.addWidget(buttons)
         
         dialog.setLayout(layout)
-        
+        dialog.adjustSize()  # Fit to visible content (disk group may already be hidden)
+
+        # Re-fit whenever the user toggles between Limited / Unlimited
+        unlimited_radio.toggled.connect(lambda: dialog.adjustSize())
+
         if dialog.exec() == QDialog.DialogCode.Accepted:
             # Save settings
             if unlimited_radio.isChecked():
@@ -4429,7 +4587,17 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
             
             AppConfig.set_log_buffer_limit(new_limit)
             AppConfig.set_show_memory_warnings(show_warnings_check.isChecked())
-            
+
+            # Disk buffering is always enabled — only the threshold differs.
+            # When Limited mode is active, reset to defaults (disk buffering never runs there).
+            AppConfig.set_disk_buffer_enabled(True)
+            AppConfig.set_disk_buffer_limit(0)  # always keep the full file
+            if new_limit > 0:
+                AppConfig.set_ui_trim_threshold(100_000)
+            else:
+                new_trim = 100_000 if trim_default_radio.isChecked() else trim_spin.value()
+                AppConfig.set_ui_trim_threshold(new_trim)
+
             # Apply buffer limit to current log output
             if new_limit > 0:
                 self.log_output.document().setMaximumBlockCount(new_limit)

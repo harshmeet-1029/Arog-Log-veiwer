@@ -432,6 +432,58 @@ class AppConfig:
         AppConfig.save_config(config)
     
     @staticmethod
+    def get_disk_buffer_enabled() -> bool:
+        """Get whether disk buffering is enabled (default: True)."""
+        config = AppConfig.load_config()
+        return config.get('disk_buffer_enabled', True)
+
+    @staticmethod
+    def set_disk_buffer_enabled(enabled: bool) -> None:
+        """Set whether disk buffering is enabled."""
+        config = AppConfig.load_config()
+        config['disk_buffer_enabled'] = enabled
+        AppConfig.save_config(config)
+
+    @staticmethod
+    def get_disk_buffer_limit() -> int:
+        """Get the disk buffer line limit (0 = unlimited)."""
+        config = AppConfig.load_config()
+        return config.get('disk_buffer_limit', 0)
+
+    @staticmethod
+    def set_disk_buffer_limit(limit: int) -> None:
+        """Set the disk buffer line limit (0 = unlimited)."""
+        config = AppConfig.load_config()
+        config['disk_buffer_limit'] = limit
+        AppConfig.save_config(config)
+
+    @staticmethod
+    def get_ui_trim_threshold() -> int:
+        """
+        Get the UI trim threshold: the maximum number of lines kept visible in the
+        QTextEdit before the oldest lines are trimmed out (disk buffering mode only).
+
+        Hard cap: 100 000 — values above this are silently clamped down.
+        Default:  100 000 (matches the previous hardcoded value).
+        Min:      user-chosen; no enforced floor (depends on SSD wear tolerance).
+        """
+        config = AppConfig.load_config()
+        value = config.get('ui_trim_threshold', 100_000)
+        return min(int(value), 100_000)
+
+    @staticmethod
+    def set_ui_trim_threshold(threshold: int) -> None:
+        """
+        Set the UI trim threshold (capped at the hard max of 100 000).
+
+        Args:
+            threshold: Max lines to keep in QTextEdit before trimming older lines.
+        """
+        config = AppConfig.load_config()
+        config['ui_trim_threshold'] = min(int(threshold), 100_000)
+        AppConfig.save_config(config)
+
+    @staticmethod
     def get_installation_metadata() -> dict:
         """
         Get installation metadata (platform, package_type, architecture).

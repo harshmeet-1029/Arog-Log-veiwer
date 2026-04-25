@@ -423,130 +423,194 @@ del "%~f0"
             }
     
     @staticmethod
+    def _get_current_app_path() -> Optional[str]:
+        """
+        Return the path to the running .app bundle, e.g. /Applications/ArgoLogViewer.app
+        Returns None if not running as a frozen .app.
+        """
+        if not getattr(sys, 'frozen', False):
+            return None
+        exe = sys.executable  # …/ArgoLogViewer.app/Contents/MacOS/ArgoLogViewer-Installer
+        marker = '.app/Contents/MacOS/'
+        idx = exe.find(marker)
+        if idx == -1:
+            return None
+        return exe[:idx + 4]  # up to and including ".app"
+
+    @staticmethod
     def _launch_macos(file_path: str, package_type: str) -> Dict[str, any]:
         """
-        Prepare macOS installation (DMG mount or ZIP extract).
-        
-        Args:
-            file_path: Path to .dmg or .zip file
-            package_type: 'dmg' or 'zip'
-            
-        Returns:
-            Result dictionary
+        Auto-install macOS update via a background shell script.
+
+        DMG flow: mount → copy .app over current install → unmount → relaunch
+        ZIP flow: extract → copy .app over current install → relaunch
+
+        If the current install path cannot be determined we fall back to
+        opening Finder so the user can drag manually.
         """
         try:
+            current_app = InstallerLauncher._get_current_app_path()
+            logger.info(f"Current .app path: {current_app}")
+
             if package_type == 'dmg':
                 logger.info(f"Preparing macOS DMG: {file_path}")
-                
-                # Remove quarantine attribute
-                try:
-                    subprocess.run(['xattr', '-cr', file_path], check=False, capture_output=True)
-                    logger.info("Removed quarantine attribute from DMG")
-                except Exception as e:
-                    logger.warning(f"Could not remove quarantine: {e}")
-                
-                # Mount DMG
+
+                # Strip quarantine from the DMG itself
+                subprocess.run(['xattr', '-cr', file_path], check=False, capture_output=True)
+
+                # Mount silently (-nobrowse keeps Finder from popping open)
                 try:
                     result = subprocess.run(
-                        ['hdiutil', 'attach', file_path],
-                        capture_output=True,
-                        text=True,
-                        check=True
+                        ['hdiutil', 'attach', file_path, '-nobrowse'],
+                        capture_output=True, text=True, check=True
                     )
-                    logger.info(f"DMG mounted successfully")
-                    
-                    # Find mount point (usually /Volumes/Argo Log Viewer...)
-                    mount_point = None
-                    for line in result.stdout.split('\n'):
-                        if '/Volumes/' in line:
-                            parts = line.split('/Volumes/')
-                            if len(parts) > 1:
-                                mount_point = '/Volumes/' + parts[1].strip()
-                                break
-                    
-                    # Open Finder to mounted volume
-                    if mount_point:
-                        subprocess.run(['open', mount_point], check=False)
-                    
                 except Exception as e:
                     logger.error(f"Error mounting DMG: {e}")
                     return {
                         'success': False,
                         'action': 'error',
-                        'message': f'Could not mount DMG: {str(e)}\n\nPlease open manually: {file_path}',
+                        'message': f'Could not mount DMG: {str(e)}\n\nPlease open manually:\n{file_path}',
                         'needs_manual': True
                     }
-                
-                return {
-                    'success': True,
-                    'action': 'prepared',
-                    'message': f'✓ Update downloaded and prepared!\n\n'
-                              f'The DMG has been mounted and is ready to install.\n\n'
-                              f'To complete installation:\n\n'
-                              f'1. Click OK to close this app\n'
-                              f'2. Drag ArgoLogViewer to Applications folder (replace the old version)\n'
-                              f'3. Open System Settings → Privacy & Security\n'
-                              f'4. Scroll down and click "Open Anyway"\n'
-                              f'5. Confirm by clicking "Open"\n\n'
-                              f'(Same steps as when you first installed the app!)\n\n'
-                              f'DMG Location: {file_path}',
-                    'needs_manual': True
-                }
-            
+
+                # Parse mount point from hdiutil output
+                mount_point = None
+                for line in result.stdout.split('\n'):
+                    if '/Volumes/' in line:
+                        mount_point = '/Volumes/' + line.split('/Volumes/')[-1].strip()
+                        break
+                logger.info(f"DMG mounted at: {mount_point}")
+
+                # Find .app inside the DMG
+                app_in_dmg = None
+                if mount_point and os.path.isdir(mount_point):
+                    for item in os.listdir(mount_point):
+                        if item.endswith('.app'):
+                            app_in_dmg = os.path.join(mount_point, item)
+                            break
+
+                if app_in_dmg and current_app:
+                    # --- AUTOMATIC INSTALL ---
+                    # Write a background script: wait for app to quit → replace → relaunch.
+                    # sleep 3 gives the app enough time to close completely before we
+                    # delete and replace the bundle.
+                    script_path = '/tmp/argo_macos_update.sh'
+                    with open(script_path, 'w') as f:
+                        f.write(f"""#!/bin/bash
+sleep 3
+
+rm -rf "{current_app}"
+cp -R "{app_in_dmg}" "{current_app}"
+
+# Strip quarantine so macOS doesn't block the relaunch
+xattr -cr "{current_app}" 2>/dev/null || true
+
+# Unmount DMG and clean up
+hdiutil detach "{mount_point}" -quiet 2>/dev/null || true
+rm -f "{file_path}"
+rm -f "$0"
+
+open "{current_app}"
+""")
+                    os.chmod(script_path, 0o755)
+                    subprocess.Popen(['bash', script_path])
+
+                    # No 'message' key — _install_update will quit immediately
+                    # without showing a dialog, so the 3-second window is safe.
+                    return {
+                        'success': True,
+                        'action': 'launched',
+                        'needs_manual': False
+                    }
+
+                else:
+                    # Fallback: open Finder so user can drag manually
+                    if mount_point:
+                        subprocess.run(['open', mount_point], check=False)
+                    return {
+                        'success': True,
+                        'action': 'prepared',
+                        'message': (
+                            'The update DMG has been mounted.\n\n'
+                            'To complete the update:\n'
+                            '1. Click OK to close this app\n'
+                            '2. Drag ArgoLogViewer.app to your Applications folder\n'
+                            '   (click Replace when asked)\n\n'
+                            f'DMG location: {file_path}'
+                        ),
+                        'needs_manual': True
+                    }
+
             elif package_type == 'zip':
                 logger.info(f"Preparing macOS ZIP: {file_path}")
-                
-                # Extract ZIP
+
                 extract_dir = os.path.join(tempfile.gettempdir(), 'ArgoLogViewer_Update')
-                os.makedirs(extract_dir, exist_ok=True)
-                
+                if os.path.exists(extract_dir):
+                    shutil.rmtree(extract_dir)
+                os.makedirs(extract_dir)
+
                 try:
                     shutil.unpack_archive(file_path, extract_dir)
                     logger.info(f"ZIP extracted to {extract_dir}")
-                    
-                    # Find .app bundle
-                    app_path = None
-                    for item in os.listdir(extract_dir):
-                        if item.endswith('.app'):
-                            app_path = os.path.join(extract_dir, item)
-                            break
-                    
-                    if app_path:
-                        # Remove quarantine
-                        try:
-                            subprocess.run(['xattr', '-cr', app_path], check=False, capture_output=True)
-                            logger.info("Removed quarantine attribute from app")
-                        except Exception as e:
-                            logger.warning(f"Could not remove quarantine: {e}")
-                        
-                        # Open Finder to location
-                        subprocess.run(['open', '-R', app_path], check=False)
-                    
                 except Exception as e:
                     logger.error(f"Error extracting ZIP: {e}")
                     return {
                         'success': False,
                         'action': 'error',
-                        'message': f'Could not extract ZIP: {str(e)}\n\nPlease extract manually: {file_path}',
+                        'message': f'Could not extract ZIP: {str(e)}\n\nPlease extract manually:\n{file_path}',
                         'needs_manual': True
                     }
-                
-                return {
-                    'success': True,
-                    'action': 'prepared',
-                    'message': f'✓ Update downloaded and extracted!\n\n'
-                              f'The app bundle has been extracted and is ready to install.\n\n'
-                              f'To complete installation:\n\n'
-                              f'1. Click OK to close this app\n'
-                              f'2. Move ArgoLogViewer.app to your Applications folder\n'
-                              f'3. Open System Settings → Privacy & Security\n'
-                              f'4. Scroll down and click "Open Anyway"\n'
-                              f'5. Confirm by clicking "Open"\n\n'
-                              f'(Same steps as when you first installed the app!)\n\n'
-                              f'The file is in your Downloads folder:\n{extract_dir}',
-                    'needs_manual': True
-                }
-            
+
+                # Find .app inside the extracted folder
+                app_in_zip = None
+                for item in os.listdir(extract_dir):
+                    if item.endswith('.app'):
+                        app_in_zip = os.path.join(extract_dir, item)
+                        break
+
+                if app_in_zip and current_app:
+                    # --- AUTOMATIC INSTALL ---
+                    script_path = '/tmp/argo_macos_update.sh'
+                    with open(script_path, 'w') as f:
+                        f.write(f"""#!/bin/bash
+sleep 3
+
+rm -rf "{current_app}"
+cp -R "{app_in_zip}" "{current_app}"
+xattr -cr "{current_app}" 2>/dev/null || true
+
+rm -rf "{extract_dir}"
+rm -f "{file_path}"
+rm -f "$0"
+
+open "{current_app}"
+""")
+                    os.chmod(script_path, 0o755)
+                    subprocess.Popen(['bash', script_path])
+
+                    return {
+                        'success': True,
+                        'action': 'launched',
+                        'needs_manual': False
+                    }
+
+                else:
+                    # Fallback: open Finder at extract location
+                    if app_in_zip:
+                        subprocess.run(['open', '-R', app_in_zip], check=False)
+                    return {
+                        'success': True,
+                        'action': 'prepared',
+                        'message': (
+                            'The update has been extracted.\n\n'
+                            'To complete the update:\n'
+                            '1. Click OK to close this app\n'
+                            '2. Move the new ArgoLogViewer.app to replace the old one\n\n'
+                            f'Extracted to: {extract_dir}'
+                        ),
+                        'needs_manual': True
+                    }
+
         except Exception as e:
             logger.error(f"Error preparing macOS update: {e}", exc_info=True)
             return {
