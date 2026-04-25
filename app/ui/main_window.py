@@ -2,37 +2,107 @@
 Production-grade main window for Argo Log Viewer.
 Features: Connection management, console output, pod search, log streaming.
 """
+# ── Standard library ────────────────────────────────────────────────────────
 from typing import Optional
-from collections import deque
-from functools import lru_cache
+import queue as _queue
+import threading as _threading
 import tempfile
+import os
+import stat
+import sys
+import webbrowser
 from pathlib import Path
+from typing import Optional as Opt_Type
+
+# ── Third-party (Qt) ────────────────────────────────────────────────────────
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
-    QListWidget, QTextEdit, QLineEdit, QLabel, 
+    QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
+    QListWidget, QTextEdit, QPlainTextEdit, QLineEdit, QLabel,
     QMessageBox, QSplitter, QGroupBox, QComboBox,
     QMenuBar, QDialog, QDialogButtonBox, QFileDialog, QSizePolicy,
     QMenu, QCheckBox, QSpinBox
 )
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, QRegularExpression
 from PySide6.QtGui import (
-    QFont, QTextCursor, QPalette, QColor, QAction, 
-    QTextDocument, QShortcut, QKeySequence, QIcon,
-    QTextCharFormat, QTextBlockFormat
+    QFont, QTextCursor, QPalette, QColor, QAction,
+    QTextDocument, QShortcut, QKeySequence, QIcon
 )
+
+# ── Application ──────────────────────────────────────────────────────────────
 from app.ssh.argo_worker import ArgoWorker
 from app.ssh.connection_manager import SSHConnectionManager
 from app.logging_config import get_logger
 from app.config import SecurityConfig, AppConfig, UpdateConfig
 from app.update_checker import UpdateChecker, UpdateInfo
 from app.themes import get_theme, get_available_theme_names, get_theme_name_from_display
-import os
-import stat
-import sys
-import webbrowser
-from typing import Optional as Opt_Type
 
 logger = get_logger(__name__)
+
+
+# ── Background disk writer ───────────────────────────────────────────────────
+
+class _DiskWriter(_threading.Thread):
+    """
+    Non-blocking background disk writer.
+    All writes are queued and drained by a daemon thread so the GUI is never blocked.
+    """
+
+    _FLUSH = object()  # Sentinel: flush file and signal caller
+
+    def __init__(self, path: str):
+        super().__init__(daemon=True, name="ArgoLogDiskWriter")
+        self._path = path
+        self._q: _queue.Queue = _queue.Queue()
+        self._file = open(path, 'w', encoding='utf-8', buffering=65536)
+        self.start()
+
+    def write(self, text: str) -> None:
+        """Queue text for background writing (returns instantly)."""
+        self._q.put(text)
+
+    def flush_and_wait(self) -> None:
+        """Block until all queued writes are physically on disk (for Save Logs)."""
+        done = _threading.Event()
+        self._q.put((self._FLUSH, done))
+        done.wait(timeout=30)
+
+    def close(self) -> None:
+        """Drain queue, flush, and close. Blocks until complete."""
+        self._q.put(None)  # Shutdown sentinel
+        self.join(timeout=30)
+
+    def run(self) -> None:
+        try:
+            while True:
+                item = self._q.get()
+                if item is None:
+                    break
+                if isinstance(item, tuple) and item[0] is self._FLUSH:
+                    try:
+                        self._file.flush()
+                    finally:
+                        item[1].set()  # Always unblock the caller, even on flush error
+                else:
+                    self._file.write(item)
+        except Exception:
+            import logging as _logging
+            _logging.getLogger(__name__).error(
+                "DiskWriter thread crashed", exc_info=True
+            )
+            # Drain the queue and unblock any pending flush_and_wait callers
+            try:
+                while True:
+                    item = self._q.get_nowait()
+                    if isinstance(item, tuple) and item[0] is self._FLUSH:
+                        item[1].set()  # Unblock caller so it doesn't hang
+            except Exception:
+                pass
+        finally:
+            try:
+                self._file.flush()
+                self._file.close()
+            except Exception:
+                pass
 
 
 # NOTE: Theme styling is now managed in app/themes.py
@@ -87,25 +157,22 @@ class MainWindow(QWidget):
         self.search_occurrences = []
         self.current_occurrence_index = -1
         
-        # PERFORMANCE: Hybrid disk+memory strategy for 2GB RAM with unlimited logs
-        self.log_lines = deque(maxlen=50000)  # Keep last 50k lines in memory (UI display)
-        self._log_append_batch = []  # Batch log lines before UI update
-        self._batch_timer = None  # Timer for batch processing
-        self._search_cache_text = ""  # Cache for search optimization
+        # PERFORMANCE: Batch log lines before UI update
+        self._log_append_batch = []
+        self._batch_timer = None
+        self._search_cache_text = ""  # Cache key for search optimization
         
         # METRICS: Last known reading (shown when metrics stop/error)
         self._last_metrics_cpu = ""
         self._last_metrics_memory = ""
 
-        # DISK BUFFERING: Optional disk streaming (only for unlimited mode)
-        self._disk_buffering_enabled = False  # Only enable for unlimited logs
-        self._disk_log_file = None  # Temp file handle for streaming logs
+        # DISK BUFFERING: Background writer thread (unlimited mode only)
+        self._disk_buffering_enabled = False
+        self._disk_writer: Optional[_DiskWriter] = None
         self._disk_log_path = None  # Path to temp log file
         self._disk_log_lines_count = 0  # Total lines written to disk
         self._ui_lines_count = 0  # Lines currently in UI
-        self._disk_buffer_ram_cache = []  # RAM buffer before disk write (reduces SSD wear)
-        self._disk_buffer_cache_size = 100  # Write to disk every 100 lines (reduces writes)
-        self._max_disk_file_size = 1024 * 1024 * 500  # 500MB max per log file (prevents huge files)
+        self._max_disk_file_size = 1024 * 1024 * 500  # 500 MB safety cap
         
         # SMART SCROLL: On-demand loading for perfect UX
         self._ui_start_line = 0  # First line number shown in UI (0-based)
@@ -259,47 +326,56 @@ class MainWindow(QWidget):
     
     def _find_all_occurrences(self, search_text):
         """
-        Find all occurrences of search text with caching optimization.
-        Uses document text hash to avoid re-scanning unchanged content.
+        Find all occurrences of search_text in the visible log document.
+
+        Returns a list of (start, end) character-position tuples.
+        Supports plain text (case-insensitive) and regular expressions.
+        Uses O(1) blockCount cache key — never calls toPlainText().
         """
         if not search_text:
             return []
-        
+
         try:
-            # PERFORMANCE: Check cache first
-            current_text = self.log_output.toPlainText()
-            cache_key = f"{search_text}:{len(current_text)}"
-            
+            doc = self.log_output.document()
+            use_regex = hasattr(self, '_regex_btn') and self._regex_btn.isChecked()
+            cache_key = f"{search_text}:{doc.blockCount()}:{use_regex}"
+
             if cache_key == self._search_cache_text and hasattr(self, '_cached_occurrences'):
-                logger.debug("Using cached search results")
                 return self._cached_occurrences
-            
+
             occurrences = []
-            document = self.log_output.document()
-            cursor = QTextCursor(document)
-            cursor.movePosition(QTextCursor.MoveOperation.Start)
-            
-            # PERFORMANCE: Limit search iterations to prevent hang
-            max_iterations = 50000  # Safety limit
-            iterations = 0
-            
-            while iterations < max_iterations:
-                cursor = document.find(search_text, cursor, QTextDocument.FindFlag(0))
-                if cursor.isNull():
-                    break
-                start_pos = cursor.position() - len(search_text)
-                occurrences.append(start_pos)
-                iterations += 1
-            
-            if iterations >= max_iterations:
-                logger.warning(f"Search hit iteration limit at {max_iterations} matches")
-            
-            # Cache results
+            max_iterations = 50000
+
+            if use_regex:
+                regex = QRegularExpression(
+                    search_text,
+                    QRegularExpression.PatternOption.CaseInsensitiveOption
+                )
+                if not regex.isValid():
+                    logger.warning(f"Invalid regex '{search_text}' — falling back to plain search")
+                    use_regex = False
+
+            if use_regex:
+                cursor = QTextCursor(doc)
+                cursor.movePosition(QTextCursor.MoveOperation.Start)
+                for _ in range(max_iterations):
+                    cursor = doc.find(regex, cursor)
+                    if cursor.isNull():
+                        break
+                    occurrences.append((cursor.selectionStart(), cursor.selectionEnd()))
+            else:
+                cursor = QTextCursor(doc)
+                cursor.movePosition(QTextCursor.MoveOperation.Start)
+                for _ in range(max_iterations):
+                    cursor = doc.find(search_text, cursor, QTextDocument.FindFlag(0))
+                    if cursor.isNull():
+                        break
+                    occurrences.append((cursor.selectionStart(), cursor.selectionEnd()))
+
             self._search_cache_text = cache_key
             self._cached_occurrences = occurrences
-            
             return occurrences
-            
+
         except Exception as e:
             logger.error(f"Error finding occurrences: {e}", exc_info=True)
             return []
@@ -321,19 +397,15 @@ class MainWindow(QWidget):
         """Jump to a specific occurrence by index."""
         if not self.search_occurrences or index < 0 or index >= len(self.search_occurrences):
             return False
-        
-        start_position = self.search_occurrences[index]
+
+        start_pos, end_pos = self.search_occurrences[index]
         cursor = self.log_output.textCursor()
-        
-        # Set cursor to the start of the match
-        cursor.setPosition(start_position)
-        
-        # Select exactly the search term length
-        cursor.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor, len(self.current_search_term))
-        
+        cursor.setPosition(start_pos)
+        cursor.setPosition(end_pos, QTextCursor.MoveMode.KeepAnchor)
+
         self.log_output.setTextCursor(cursor)
         self.log_output.ensureCursorVisible()
-        
+
         self.current_occurrence_index = index
         self._update_match_counter()
         return True
@@ -380,13 +452,17 @@ class MainWindow(QWidget):
             self.clear_log_search()
             self.log_output.setFocus()
             logger.debug("Search bar hidden")
-    
-    def _focus_log_search(self):
-        """Focus the log search input field and select all text."""
-        self.log_search_input.setFocus()
-        self.log_search_input.selectAll()
-        logger.debug("Log search input focused")
-    
+
+    def _on_regex_toggled(self, _checked: bool):
+        """Re-run the current search whenever the regex toggle changes."""
+        if self.current_search_term:
+            self._search_cache_text = ""  # Force fresh scan with new mode
+            self.search_occurrences = self._find_all_occurrences(self.current_search_term)
+            self.current_occurrence_index = -1
+            self._update_match_counter()
+            if self.search_occurrences:
+                self._jump_to_occurrence(0)
+
     def _create_menu_bar(self) -> QMenuBar:
         """Create application menu bar."""
         logger.debug("Creating menu bar")
@@ -705,10 +781,18 @@ class MainWindow(QWidget):
         self.close_search_btn = QPushButton("Close")
         self.close_search_btn.clicked.connect(self.hide_search_bar)
         self.close_search_btn.setToolTip("Close (Esc)")
-        self.close_search_btn.setFixedWidth(80) # Wider button
-        self.close_search_btn.setFixedHeight(28) # Taller button
+        self.close_search_btn.setFixedWidth(80)
+        self.close_search_btn.setFixedHeight(28)
         search_bar_layout.addWidget(self.close_search_btn)
-        
+
+        self._regex_btn = QPushButton(".*")
+        self._regex_btn.setCheckable(True)
+        self._regex_btn.setToolTip("Enable Regular Expression search")
+        self._regex_btn.setFixedWidth(40)
+        self._regex_btn.setFixedHeight(28)
+        self._regex_btn.toggled.connect(self._on_regex_toggled)
+        search_bar_layout.addWidget(self._regex_btn)
+
         search_bar_layout.addStretch()
         
         # Hide search bar by default
@@ -750,23 +834,28 @@ class MainWindow(QWidget):
         self.load_older_bar.setVisible(False)
         log_container_layout.addWidget(self.load_older_bar)
         
-        # Log output text area
-        self.log_output = QTextEdit()
+        # Log output — QPlainTextEdit is much faster than QTextEdit for plain text
+        self.log_output = QPlainTextEdit()
         self.log_output.setReadOnly(True)
-        self.log_output.setLineWrapMode(QTextEdit.WidgetWidth if AppConfig.get_word_wrap() else QTextEdit.NoWrap)
+        wrap_mode = (QPlainTextEdit.LineWrapMode.WidgetWidth
+                     if AppConfig.get_word_wrap()
+                     else QPlainTextEdit.LineWrapMode.NoWrap)
+        self.log_output.setLineWrapMode(wrap_mode)
         self.log_output.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.log_output.customContextMenuRequested.connect(self._show_log_context_menu)
-        
-        # Use monospace font for logs
+
         log_font = QFont("Courier New", 9)
         self.log_output.setFont(log_font)
-        
-        # Initialize with unlimited buffer (default behavior)
-        # User can change this in Settings > Advanced Settings
+
+        # Apply the user's configured buffer limit immediately
         buffer_limit = AppConfig.get_log_buffer_limit()
         if buffer_limit > 0:
             self.log_output.document().setMaximumBlockCount(buffer_limit)
-        # else: unlimited (Qt default - no limit)
+        else:
+            # Unlimited mode: cap UI at the scroll-back threshold to keep RAM bounded
+            self.log_output.document().setMaximumBlockCount(
+                AppConfig.get_ui_trim_threshold()
+            )
         
         log_container_layout.addWidget(self.log_output)
         layout.addWidget(self.log_container)
@@ -1515,25 +1604,35 @@ class MainWindow(QWidget):
             progress.setWindowModality(Qt.WindowModality.WindowModal)
             progress.setMinimumDuration(500)
             
-            # Search disk file line by line
+            # Search disk file line by line (plain text or regex)
+            use_regex = hasattr(self, '_regex_btn') and self._regex_btn.isChecked()
             first_match_line = -1
             total_matches = 0
-            search_lower = search_text.lower()
-            
+
+            import re as _re
+            if use_regex:
+                try:
+                    pattern = _re.compile(search_text, _re.IGNORECASE)
+                    match_fn = lambda line: bool(pattern.search(line))
+                except _re.error:
+                    use_regex = False
+                    match_fn = lambda line: search_text.lower() in line.lower()
+            else:
+                search_lower = search_text.lower()
+                match_fn = lambda line: search_lower in line.lower()
+
             with open(self._disk_log_path, 'r', encoding='utf-8') as f:
                 for line_num, line in enumerate(f):
                     if progress.wasCanceled():
                         logger.info("Search cancelled by user")
                         progress.close()
                         return
-                    
-                    # Case-insensitive search
-                    if search_lower in line.lower():
+
+                    if match_fn(line):
                         total_matches += 1
                         if first_match_line < 0:
                             first_match_line = line_num
-                    
-                    # Update progress every 1000 lines
+
                     if line_num % 1000 == 0:
                         progress.setValue(line_num)
             
@@ -1668,26 +1767,26 @@ class MainWindow(QWidget):
     
     def save_logs_to_file(self):
         """
-        Save ALL logs to file (from disk buffer if available).
-        
-        2GB RAM OPTIMIZATION: If disk buffer exists, saves complete logs (unlimited!),
-        otherwise saves UI content (recent 50k).
+        Save ALL logs to a text file.
+
+        If a disk buffer exists, flush the background writer first so every line
+        is present in the file, then copy it directly (zero RAM overhead).
+        Otherwise, save the visible UI content.
         """
         logger.info("Save logs to file requested")
-        
-        # Check if we have disk buffer with full logs
-        has_disk_buffer = (self._disk_log_path and 
-                           self._disk_log_path.exists() and 
+
+        has_disk_buffer = (self._disk_log_path and
+                           self._disk_log_path.exists() and
                            self._disk_log_lines_count > 0)
-        
-        # Get log content source
+
         if has_disk_buffer:
+            # Flush any in-flight writes before reading the file
+            if self._disk_writer:
+                self._disk_writer.flush_and_wait()
+            log_source = "disk"
             logger.info(f"Saving FULL logs from disk buffer ({self._disk_log_lines_count:,} lines)")
-            log_source = "disk"  # Will read from disk
         else:
-            logger.info("Saving logs from UI (recent lines only)")
-            # FIX: Extract text block by block to avoid Qt's paragraph spacing
-            # Qt's toPlainText() adds extra newlines between text blocks
+            log_source = "ui"
             document = self.log_output.document()
             blocks = []
             block = document.begin()
@@ -1695,82 +1794,52 @@ class MainWindow(QWidget):
                 blocks.append(block.text())
                 block = block.next()
             log_content = "\n".join(blocks)
-            log_source = "ui"
-            
             if not log_content:
                 QMessageBox.warning(self._get_active_window(), "No Logs", "There are no logs to save.")
                 return
-        
-        # Get pod name for default filename
+            logger.info("Saving logs from UI (visible lines only)")
+
         pod_name = self.current_pod_label.text().replace("Viewing logs for: ", "").split("│")[0].strip()
         pod_name = pod_name.replace(":", "-")
         if not pod_name or pod_name == "No pod selected":
             pod_name = "logs"
-        
-        # Generate default filename with timestamp
+
         from datetime import datetime
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         default_filename = f"{pod_name}_{timestamp}.txt"
-        
-        # Prepare dialog title
-        title = "Save All Logs" if has_disk_buffer else "Save Logs"
-        if has_disk_buffer:
-            title += f" ({self._disk_log_lines_count:,} lines)"
-        
-        # Open file dialog
-        file_path, selected_filter = QFileDialog.getSaveFileName(
+
+        title = f"Save All Logs ({self._disk_log_lines_count:,} lines)" if has_disk_buffer else "Save Logs"
+
+        file_path, _ = QFileDialog.getSaveFileName(
             self._get_active_window(),
             title,
             default_filename,
-            "Text Files (*.txt);;HTML Files (*.html);;Log Files (*.log);;All Files (*.*)"
+            "Text Files (*.txt);;Log Files (*.log);;All Files (*.*)"
         )
-        
+
         if file_path:
             try:
-                # Determine format
-                is_html = file_path.endswith('.html') or 'HTML' in selected_filter
-                
                 if log_source == "disk":
-                    # Copy from disk buffer (complete logs!)
-                    with open(self._disk_log_path, 'r', encoding='utf-8') as src:
-                        if is_html:
-                            # Read and convert to HTML
-                            log_content = src.read()
-                            html_content = self._generate_html_log_export(log_content, pod_name)
-                            with open(file_path, 'w', encoding='utf-8') as dst:
-                                dst.write(html_content)
-                        else:
-                            # Direct copy (most efficient!)
-                            with open(file_path, 'w', encoding='utf-8') as dst:
-                                # Copy in chunks for memory efficiency
-                                while True:
-                                    chunk = src.read(1024 * 1024)  # 1MB chunks
-                                    if not chunk:
-                                        break
-                                    dst.write(chunk)
-                    
+                    with open(self._disk_log_path, 'r', encoding='utf-8') as src, \
+                         open(file_path, 'w', encoding='utf-8') as dst:
+                        while True:
+                            chunk = src.read(1024 * 1024)  # 1 MB chunks
+                            if not chunk:
+                                break
+                            dst.write(chunk)
                     logger.info(f"Saved {self._disk_log_lines_count:,} lines from disk buffer")
                 else:
-                    # Save from UI content
-                    if is_html:
-                        html_content = self._generate_html_log_export(log_content, pod_name)
-                        with open(file_path, 'w', encoding='utf-8') as f:
-                            f.write(html_content)
-                    else:
-                        with open(file_path, 'w', encoding='utf-8') as f:
-                            f.write(log_content)
-                
-                # SECURITY: Set secure file permissions (owner read/write only)
-                # This prevents other users from reading potentially sensitive logs
+                    with open(file_path, 'w', encoding='utf-8') as f:
+                        f.write(log_content)
+
                 secure_perms = SecurityConfig.get_secure_file_permissions()
-                if secure_perms and os.name != 'nt':  # Unix-like systems only
+                if secure_perms and os.name != 'nt':
                     try:
                         os.chmod(file_path, secure_perms)
-                        logger.info(f"SECURITY: Set secure file permissions {oct(secure_perms)} on {file_path}")
                     except Exception as perm_error:
-                        logger.warning(f"Could not set secure file permissions: {perm_error}")
-                
-                logger.info(f"Logs saved successfully to: {file_path}")
+                        logger.warning(f"Could not set file permissions: {perm_error}")
+
+                logger.info(f"Logs saved to: {file_path}")
                 QMessageBox.information(
                     self._get_active_window(),
                     "Success",
@@ -1783,122 +1852,6 @@ class MainWindow(QWidget):
                     "Error",
                     f"Failed to save logs:\n{str(e)}"
                 )
-    
-    def _generate_html_log_export(self, log_content: str, pod_name: str) -> str:
-        """Generate HTML export with log level highlighting."""
-        from datetime import datetime
-        import html
-        import re
-        
-        # Check if we're in limited mode
-        limit = AppConfig.get_log_buffer_limit()
-        warning_html = ""
-        if limit > 0:
-            warning_html = f"""
-            <div class="warning">
-                <strong>Limited Mode Active:</strong> Only the most recent {limit} lines were saved. 
-                Older logs were discarded to save memory. 
-                Switch to 'Unlimited' mode in Settings to capture full history.
-            </div>
-            """
-        
-        # HTML template with styling
-        html_template = """<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <title>Logs: {pod_name}</title>
-    <style>
-        body {{
-            font-family: 'Courier New', monospace;
-            background-color: #1e1e1e;
-            color: #d4d4d4;
-            padding: 20px;
-            margin: 0;
-        }}
-        .header {{
-            background-color: #2d2d2d;
-            padding: 15px;
-            border-radius: 5px;
-            margin-bottom: 20px;
-        }}
-        .header h1 {{
-            margin: 0;
-            color: #4a9eff;
-            font-size: 24px;
-        }}
-        .header p {{
-            margin: 5px 0 0 0;
-            color: #888;
-            font-size: 14px;
-        }}
-        .logs {{
-            background-color: #1e1e1e;
-            padding: 15px;
-            border: 1px solid #3c3c3c;
-            border-radius: 5px;
-            overflow-x: auto;
-            white-space: pre-wrap;
-            line-height: 1.4;
-        }}
-        .warning {{
-            background-color: #3e2723;
-            border-left: 5px solid #ff5722;
-            padding: 10px;
-            margin-bottom: 20px;
-            border-radius: 4px;
-            color: #ffcc80;
-        }}
-        /* Only ERROR and WARN are highlighted (not INFO/DEBUG) */
-        .error {{ color: #ff6b6b; font-weight: bold; }}
-        .warn {{ color: #ffa726; font-weight: bold; }}
-    </style>
-</head>
-<body>
-    <div class="header">
-        <h1>📋 Logs: {pod_name}</h1>
-        <p>Generated: {timestamp}</p>
-        <p>Total Lines: {total_lines} | Errors: {errors} | Warnings: {warnings}</p>
-    </div>
-    {warning_html}
-    <div class="logs">{highlighted_logs}</div>
-</body>
-</html>"""
-        
-        # Count statistics (using word boundaries for accuracy)
-        lines = log_content.split('\n')
-        total_lines = len(lines)
-        errors = sum(1 for line in lines if re.search(r'\b(ERROR|FATAL|CRITICAL|EXCEPTION)\b', line.upper()))
-        warnings = sum(1 for line in lines if re.search(r'\b(WARN|WARNING)\b', line.upper()))
-        
-        # Highlight each line (ONLY critical levels: ERROR/WARN)
-        highlighted_lines = []
-        for line in lines:
-            escaped_line = html.escape(line)
-            line_upper = line.upper()
-            
-            # Use word boundaries to avoid false positives
-            if re.search(r'\b(ERROR|FATAL|CRITICAL|EXCEPTION)\b', line_upper):
-                highlighted_lines.append(f'<span class="error">{escaped_line}</span>')
-            elif re.search(r'\b(WARN|WARNING)\b', line_upper):
-                highlighted_lines.append(f'<span class="warn">{escaped_line}</span>')
-            else:
-                # No highlighting for INFO/DEBUG (too common, creates clutter)
-                highlighted_lines.append(escaped_line)
-        
-        highlighted_logs = '\n'.join(highlighted_lines)
-        
-        # Fill template
-        html_output = html_template.format(
-            pod_name=html.escape(pod_name),
-            timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            total_lines=total_lines,
-            errors=errors,
-            warnings=warnings,
-            highlighted_logs=highlighted_logs
-        )
-        
-        return html_output
     
     def _show_log_context_menu(self, position):
         """Show context menu for log output."""
@@ -1946,11 +1899,38 @@ class MainWindow(QWidget):
         logger.debug(f"Copied line to clipboard: {line_text[:50]}...")
     
     def _copy_all_logs(self):
-        """Copy all logs to clipboard."""
+        """
+        Copy visible logs to clipboard.
+        If older lines are on disk (trimmed from UI) or the document is very large,
+        redirect the user to 'Save Logs' to avoid clipboard crashes and data loss.
+        """
         from PySide6.QtWidgets import QApplication
-        
-        # FIX: Extract text block by block to avoid Qt's paragraph spacing
-        # Qt's toPlainText() adds extra newlines between text blocks
+
+        doc = self.log_output.document()
+        block_count = doc.blockCount()
+
+        # Guard 1: older logs are on disk — clipboard would be incomplete
+        if self._ui_start_line > 0:
+            QMessageBox.information(
+                self._get_active_window(),
+                "Incomplete Copy — Use Save Logs",
+                f"{self._ui_start_line:,} older lines are stored on disk and are NOT visible in the UI.\n\n"
+                "Copying now would give you an incomplete log.\n\n"
+                "Use  Save Logs  to get the complete history as a text file."
+            )
+            return
+
+        # Guard 2: document too large for clipboard — would crash or hang
+        if block_count > 50000:
+            QMessageBox.information(
+                self._get_active_window(),
+                "Too Large for Clipboard — Use Save Logs",
+                f"The log has {block_count:,} lines. Copying that much to the clipboard "
+                "can freeze or crash the app.\n\n"
+                "Use  Save Logs  to write it to a file instead."
+            )
+            return
+
         document = self.log_output.document()
         blocks = []
         block = document.begin()
@@ -1958,11 +1938,10 @@ class MainWindow(QWidget):
             blocks.append(block.text())
             block = block.next()
         log_content = "\n".join(blocks)
-        
+
         clipboard = QApplication.clipboard()
         clipboard.setText(log_content)
-        
-        logger.info("Copied all logs to clipboard")
+        logger.info(f"Copied {block_count:,} lines to clipboard")
     
     def _toggle_auto_reconnect(self, checked: bool):
         """Toggle auto-reconnect feature."""
@@ -1981,9 +1960,11 @@ class MainWindow(QWidget):
     def _toggle_word_wrap(self, checked: bool):
         """Toggle word wrap in console and log panels (real-time, no restart needed)."""
         AppConfig.set_word_wrap(checked)
-        mode = QTextEdit.WidgetWidth if checked else QTextEdit.NoWrap
-        self.console_output.setLineWrapMode(mode)
-        self.log_output.setLineWrapMode(mode)
+        rich_mode = QTextEdit.LineWrapMode.WidgetWidth if checked else QTextEdit.LineWrapMode.NoWrap
+        plain_mode = (QPlainTextEdit.LineWrapMode.WidgetWidth if checked
+                      else QPlainTextEdit.LineWrapMode.NoWrap)
+        self.console_output.setLineWrapMode(rich_mode)
+        self.log_output.setLineWrapMode(plain_mode)
         logger.info(f"Word wrap {'enabled' if checked else 'disabled'}")
     
     def _reset_settings_to_defaults(self):
@@ -2474,28 +2455,21 @@ class MainWindow(QWidget):
     
     def _init_disk_buffer(self, pod_name: str):
         """
-        Initialize disk buffer ONLY if unlimited logs mode is enabled.
-        
-        SMART BUFFERING:
-        - Limited logs (1000 lines) → No disk, use QTextEdit limit (fast!)
-        - Unlimited logs → Disk buffering with RAM cache (SSD-friendly!)
+        Initialize disk buffer for unlimited log mode.
+
+        Limited mode  → setMaximumBlockCount(limit); no disk file.
+        Unlimited mode → setMaximumBlockCount(ui_trim_threshold) + background _DiskWriter.
         """
         try:
-            # Close existing buffer if any
             self._close_disk_buffer()
-            
-            # Check if we should use disk buffering
+
             log_limit = AppConfig.get_log_buffer_limit()
-            
+
             if log_limit > 0:
-                # LIMITED MODE: User wants only X lines
-                logger.info(f"Limited log mode ({log_limit} lines) - disk buffering DISABLED")
+                # LIMITED MODE: Qt auto-trims; no disk needed.
+                logger.info(f"Limited log mode ({log_limit:,} lines) — disk buffering DISABLED")
                 self._disk_buffering_enabled = False
-                
-                # Set QTextEdit to limit directly (most efficient!)
                 self.log_output.document().setMaximumBlockCount(log_limit)
-                
-                # WARN USER: Limited mode does not save history!
                 self.console_output.append(
                     f"\n[!] WARNING: Limited Mode Active ({log_limit:,} lines).\n"
                     f"   • Only the most recent {log_limit:,} lines are kept.\n"
@@ -2504,81 +2478,61 @@ class MainWindow(QWidget):
                     "   • To keep everything, switch to Unlimited in Settings → Advanced Settings.\n"
                 )
                 return
-            
-            # UNLIMITED MODE: disk buffering is always on — proceed with file setup
-            self.log_output.document().setMaximumBlockCount(0)  # Remove UI line cap
+
+            # UNLIMITED MODE
+            ui_trim = AppConfig.get_ui_trim_threshold()
+            # Cap UI lines — Qt auto-removes oldest blocks when limit is exceeded.
+            self.log_output.document().setMaximumBlockCount(ui_trim)
             self._disk_buffering_enabled = True
-            
-            # Check available disk space before creating file
+
+            # Check disk space (need ≥ 1 GB)
             temp_dir = Path(tempfile.gettempdir()) / "argo_log_viewer_buffers"
             temp_dir.mkdir(exist_ok=True)
-            
-            # Check disk space (require at least 1GB free)
             import shutil
-            disk_stats = shutil.disk_usage(temp_dir)
-            free_gb = disk_stats.free / (1024 ** 3)
-            
+            free_gb = shutil.disk_usage(temp_dir).free / (1024 ** 3)
+
             if free_gb < 1.0:
-                logger.warning(f"Low disk space ({free_gb:.1f} GB) - disk buffering DISABLED")
+                logger.warning(f"Low disk space ({free_gb:.1f} GB) — disk buffering DISABLED")
                 self._disk_buffering_enabled = False
                 QMessageBox.warning(
                     self,
                     "Low Disk Space",
                     f"Only {free_gb:.1f} GB free. Disk buffering disabled.\n"
-                    "Logs limited to UI display (50k lines)."
+                    "Logs limited to UI display only."
                 )
                 return
-            
-            # Create temp file for this pod's logs
+
             safe_pod_name = "".join(c for c in pod_name if c.isalnum() or c in ('-', '_'))
             self._disk_log_path = temp_dir / f"logs_{safe_pod_name}_{os.getpid()}.txt"
-            
-            # Open file with large buffer (8KB) to reduce write frequency (SSD-friendly!)
-            self._disk_log_file = open(self._disk_log_path, 'w', encoding='utf-8', buffering=8192)
             self._disk_log_lines_count = 0
             self._ui_lines_count = 0
-            self._disk_buffer_ram_cache = []  # Reset RAM cache
-            
+
+            # Start background writer — all disk I/O is now off the GUI thread.
+            self._disk_writer = _DiskWriter(str(self._disk_log_path))
+
             logger.info(f"✓ Disk buffer initialized: {self._disk_log_path}")
-            logger.info(f"✓ Mode: Unlimited logs to disk ({free_gb:.1f} GB available)")
-            logger.info(f"✓ SSD protection: RAM cache buffering (write every {self._disk_buffer_cache_size} lines)")
-            
+            logger.info(f"✓ Unlimited mode — UI capped at {ui_trim:,} lines, rest goes to disk ({free_gb:.1f} GB free)")
+
         except Exception as e:
             logger.error(f"Error initializing disk buffer: {e}", exc_info=True)
             self._disk_buffering_enabled = False
-            self._disk_log_file = None
+            self._disk_writer = None
     
     def _close_disk_buffer(self):
         """
-        Close disk buffer and flush remaining RAM cache.
-        
-        IMPORTANT: Ensures all buffered lines are written before closing!
+        Stop the background disk writer and close the log file.
+        Blocks until all pending writes are flushed to disk.
         """
         try:
-            if self._disk_log_file:
-                # CRITICAL: Flush remaining RAM cache to disk before closing!
-                if self._disk_buffer_ram_cache:
-                    try:
-                        cached_text = "".join(self._disk_buffer_ram_cache)
-                        self._disk_log_file.write(cached_text)
-                        self._disk_log_file.flush()
-                        self._disk_buffer_ram_cache.clear()
-                        logger.debug(f"Flushed final {len(self._disk_buffer_ram_cache)} cached writes to disk")
-                    except Exception as e:
-                        logger.error(f"Error flushing final cache: {e}")
-                
-                self._disk_log_file.close()
-                
+            if self._disk_writer:
+                self._disk_writer.close()  # Drains queue, flushes, closes file
                 if self._disk_log_path and self._disk_log_path.exists():
                     file_size_mb = self._disk_log_path.stat().st_size / 1024 / 1024
-                    logger.info(f"✓ Closed disk buffer: {self._disk_log_lines_count:,} lines ({file_size_mb:.1f} MB)")
-                
-            # Keep the file for potential "Save All" and "Load Older" features
-            # Will be cleaned up on app exit or next startup
-            
-            self._disk_log_file = None
+                    logger.info(f"✓ Disk buffer closed: {self._disk_log_lines_count:,} lines ({file_size_mb:.1f} MB)")
+                self._disk_writer = None
+
             self._disk_buffering_enabled = False
-            
+
         except Exception as e:
             logger.error(f"Error closing disk buffer: {e}", exc_info=True)
     
@@ -2637,31 +2591,38 @@ class MainWindow(QWidget):
                 QMessageBox.warning(self, "Load Error", "Could not load older logs from disk.")
                 return
             
-            # Insert at the beginning of the text editor
+            doc = self.log_output.document()
+            ui_trim = AppConfig.get_ui_trim_threshold()
+
+            # Temporarily disable auto-trim so we can insert at the top without Qt
+            # immediately removing the lines we just loaded (it removes from the top).
+            doc.setMaximumBlockCount(0)
+
             cursor = self.log_output.textCursor()
             cursor.beginEditBlock()
             cursor.movePosition(QTextCursor.MoveOperation.Start)
             cursor.insertText(older_text)
             cursor.endEditBlock()
-            
+
+            # Trim from the BOTTOM if we now exceed the limit (single fast operation).
+            if doc.blockCount() > ui_trim:
+                keep_block = doc.findBlockByNumber(ui_trim - 1)
+                if keep_block.isValid():
+                    del_cursor = QTextCursor(doc)
+                    del_cursor.setPosition(keep_block.position() + keep_block.length())
+                    del_cursor.movePosition(
+                        QTextCursor.MoveOperation.End, QTextCursor.MoveMode.KeepAnchor
+                    )
+                    del_cursor.removeSelectedText()
+                self._ui_end_line = new_start + ui_trim
+                logger.debug(f"Trimmed bottom to maintain {ui_trim:,} line UI limit")
+
+            # Re-enable auto-trim for normal streaming
+            doc.setMaximumBlockCount(ui_trim)
+
             # Update tracking
             self._ui_start_line = new_start
-            self._ui_lines_count = self.log_output.document().blockCount()
-            
-            # Trim bottom if UI has too many lines (keep memory under control)
-            if self._ui_lines_count > self._max_ui_lines:
-                lines_to_remove = self._ui_lines_count - self._max_ui_lines
-                cursor.movePosition(QTextCursor.MoveOperation.End)
-                cursor.beginEditBlock()
-                for _ in range(lines_to_remove):
-                    cursor.movePosition(QTextCursor.MoveOperation.Up, QTextCursor.MoveMode.KeepAnchor)
-                    cursor.movePosition(QTextCursor.MoveOperation.StartOfLine, QTextCursor.MoveMode.KeepAnchor)
-                cursor.removeSelectedText()
-                cursor.endEditBlock()
-                
-                self._ui_end_line -= lines_to_remove
-                self._ui_lines_count = self.log_output.document().blockCount()
-                logger.debug(f"Trimmed {lines_to_remove:,} lines from bottom to maintain {self._max_ui_lines:,} line limit")
+            self._ui_lines_count = doc.blockCount()
             
             # Update UI
             self._update_load_older_bar()
@@ -2736,6 +2697,12 @@ class MainWindow(QWidget):
             
             # Combine and insert
             older_text = "".join(all_text)
+
+            # Disable the block-count cap BEFORE inserting so Qt does not
+            # immediately evict the lines we just loaded from the top.
+            # Left at 0 after load — user explicitly chose "Load All".
+            self.log_output.document().setMaximumBlockCount(0)
+
             cursor = self.log_output.textCursor()
             cursor.beginEditBlock()
             cursor.movePosition(QTextCursor.MoveOperation.Start)
@@ -2794,214 +2761,153 @@ class MainWindow(QWidget):
     def _append_log(self, text):
         """
         Append text to log output with crash protection and batching.
-        Uses deque for efficient memory management and batches updates for performance.
+        Batches up to 200 chunks before flushing; timer fires after 50 ms maximum.
         """
         try:
-            # CRITICAL: Double-check streaming state to prevent late arrivals after stop
             if not self._is_streaming_logs:
-                logger.debug("Ignoring log append - not actively streaming")
                 return
-            
-            # CRITICAL: Check if worker is still active to prevent late arrivals after stop
+
             if not self.worker or not self.worker.isRunning():
-                logger.debug("Ignoring log append - worker not active")
                 return
-            
-            # Add to deque for efficient line management
-            for line in text.splitlines(keepends=True):
-                if line.strip():  # Only add non-empty lines
-                    self.log_lines.append(line)
-            
-            # Add to batch for UI update
+
             self._log_append_batch.append(text)
-            
-            # If batch size is small, schedule batch processing
-            if len(self._log_append_batch) < 10:
+
+            # Flush immediately on large burst; otherwise schedule 50 ms timer
+            if len(self._log_append_batch) < 200:
                 if not self._batch_timer:
                     self._batch_timer = QTimer(self)
                     self._batch_timer.setSingleShot(True)
                     self._batch_timer.timeout.connect(self._flush_log_batch)
                 if not self._batch_timer.isActive():
-                    self._batch_timer.start(50)  # Flush after 50ms
+                    self._batch_timer.start(50)
                 return
-            
-            # If batch is large enough, flush immediately
+
             self._flush_log_batch()
-            
+
         except Exception as e:
             logger.error(f"Error appending log: {e}", exc_info=True)
-            # Try to at least show the error
             try:
-                self.log_output.append(f"\n[!] Log Error: {str(e)}\n")
+                self.log_output.appendPlainText(f"\n[!] Log Error: {str(e)}\n")
             except:
-                pass  # Fail silently to prevent cascading crashes
+                pass
     
     def _flush_log_batch(self):
         """
-        Flush batched log updates to UI and disk efficiently.
-        
-        MEMORY OPTIMIZATION FOR 2GB RAM:
-        - Writes ALL logs to disk (unlimited storage)
-        - Keeps only recent 50k lines in UI (low memory)
-        - User gets unlimited logs without RAM constraints!
-        
-        CRASH PROTECTION: Checks if streaming is still active before updating UI.
+        Flush batched log updates to UI and disk.
+
+        Disk I/O  → queued to _DiskWriter (background thread, never blocks GUI).
+        UI trim   → setMaximumBlockCount handles it automatically in C++ (zero Python loops).
+        Timer     → 50 ms; flushes early when batch reaches 200 items.
         """
         try:
             if not self._log_append_batch:
                 return
-            
-            # CRITICAL: Triple-check if we should still be processing logs
-            # This prevents crashes when stop is called while timer is queued
+
             if not self._is_streaming_logs:
-                logger.debug("Aborting flush - not actively streaming")
                 self._log_append_batch.clear()
                 return
-            
+
             if not self.worker or not self.worker.isRunning():
-                logger.debug("Aborting flush - worker not active")
                 self._log_append_batch.clear()
                 return
-            
-            # Stop the timer if active
+
             if self._batch_timer and self._batch_timer.isActive():
                 self._batch_timer.stop()
-            
-            # Combine all batched text
+
             combined_text = "".join(self._log_append_batch)
             self._log_append_batch.clear()
-            
-            # STEP 1: Write to disk buffer (ONLY if disk buffering enabled)
-            if self._disk_buffering_enabled and self._disk_log_file:
+
+            # ── STEP 1: queue disk write (returns instantly) ──────────────────
+            if self._disk_buffering_enabled and self._disk_writer:
                 try:
-                    # Add to RAM cache first (SSD WEAR PROTECTION!)
-                    self._disk_buffer_ram_cache.append(combined_text)
+                    self._disk_writer.write(combined_text)
                     lines_written = combined_text.count('\n')
                     self._disk_log_lines_count += lines_written
 
-                    # Check user-defined line limit (0 = unlimited)
+                    # Hard line limit (optional, user-configured)
                     disk_line_limit = AppConfig.get_disk_buffer_limit()
                     if disk_line_limit > 0 and self._disk_log_lines_count >= disk_line_limit:
-                        logger.info(f"Disk buffer line limit reached ({disk_line_limit:,}) — stopping disk writes")
+                        logger.info(f"Disk line limit ({disk_line_limit:,}) reached — stopping disk writes")
                         self._close_disk_buffer()
-                        self._disk_buffering_enabled = False
                         if hasattr(self, 'current_pod_label'):
-                            current_text = self.current_pod_label.text().split("│")[0].strip()
-                            self.current_pod_label.setText(f"{current_text} │ Disk limit: {disk_line_limit:,} lines saved")
+                            pod_text = self.current_pod_label.text().split("│")[0].strip()
+                            self.current_pod_label.setText(
+                                f"{pod_text} │ Disk limit: {disk_line_limit:,} lines saved"
+                            )
 
-                    # Only write to disk when RAM cache is full (reduces writes!)
-                    elif len(self._disk_buffer_ram_cache) >= self._disk_buffer_cache_size:
-                        # Check file size before writing (prevent huge files!)
-                        current_size = self._disk_log_path.stat().st_size if self._disk_log_path.exists() else 0
-                        
+                    # Periodic size check (every ~50 k lines) to prevent runaway files
+                    elif (self._disk_log_lines_count % 50000 < lines_written and
+                          self._disk_log_path and self._disk_log_path.exists()):
+                        current_size = self._disk_log_path.stat().st_size
                         if current_size >= self._max_disk_file_size:
-                            logger.warning(f"Disk buffer reached max size ({current_size / 1024 / 1024:.1f} MB) - stopping disk writes")
+                            logger.warning(
+                                f"Disk buffer hit {current_size / 1024 / 1024:.0f} MB cap — stopping writes"
+                            )
                             self._close_disk_buffer()
-                            self._disk_buffering_enabled = False
-                            
-                            # Notify user
                             if hasattr(self, 'current_pod_label'):
-                                current_text = self.current_pod_label.text().split("│")[0].strip()
-                                self.current_pod_label.setText(f"{current_text} │ [!] Disk limit reached ({self._disk_log_lines_count:,} lines saved)")
-                        else:
-                            # Combine cache and write to disk
-                            cached_text = "".join(self._disk_buffer_ram_cache)
-                            self._disk_log_file.write(cached_text)
-                            self._disk_log_file.flush()  # Ensure written
-                            self._disk_buffer_ram_cache.clear()  # Clear RAM cache
-                            
-                            # Log progress every 10k lines
-                            if self._disk_log_lines_count % 10000 < lines_written:
-                                file_size_mb = current_size / 1024 / 1024
-                                logger.debug(f"Disk buffer: {self._disk_log_lines_count:,} lines ({file_size_mb:.1f} MB, {self._disk_buffer_cache_size} writes cached)")
-                        
+                                pod_text = self.current_pod_label.text().split("│")[0].strip()
+                                self.current_pod_label.setText(
+                                    f"{pod_text} │ [!] Disk cap reached ({self._disk_log_lines_count:,} lines)"
+                                )
+
                 except Exception as e:
-                    logger.error(f"Error writing to disk buffer: {e}")
+                    logger.error(f"Error queuing disk write: {e}")
                     self._disk_buffering_enabled = False
-            
-            # STEP 2: Update UI (only recent logs for performance)
+
+            # ── STEP 2: update UI ─────────────────────────────────────────────
             scrollbar = self.log_output.verticalScrollBar()
             was_at_bottom = scrollbar.value() >= scrollbar.maximum() - 10
-            
-            # Use QTextCursor in batch mode
+
+            # Re-apply the block-count cap if it was removed by _load_all_logs.
+            # Without this, streaming after "Load All" grows RAM without bound.
+            doc = self.log_output.document()
+            if self._disk_buffering_enabled and doc.maximumBlockCount() == 0:
+                doc.setMaximumBlockCount(AppConfig.get_ui_trim_threshold())
+
+            # setUpdatesEnabled batches repaints into one (halves GPU work)
+            self.log_output.setUpdatesEnabled(False)
             cursor = self.log_output.textCursor()
-            cursor.beginEditBlock()
             cursor.movePosition(QTextCursor.MoveOperation.End)
             cursor.insertText(combined_text)
-            cursor.endEditBlock()
-            
-            # Update UI line counter
+            self.log_output.setUpdatesEnabled(True)
+
             self._ui_lines_count = self.log_output.document().blockCount()
-            
-            # STEP 3: MEMORY PROTECTION - Trim UI (ONLY for unlimited/disk buffer mode)
-            # NOTE: Limited mode uses QTextEdit's setMaximumBlockCount (more efficient)
+
+            # ── STEP 3: update tracking (setMaximumBlockCount trims automatically) ──
             if self._disk_buffering_enabled:
-                doc = self.log_output.document()
-                
-                # Update UI end line tracker (what's the last line shown?)
                 self._ui_end_line = self._disk_log_lines_count
-                
-                # Trim if UI has too many lines (threshold is user-configurable, max 100 000)
-                _ui_trim_threshold = AppConfig.get_ui_trim_threshold()
-                if doc.blockCount() > _ui_trim_threshold:
-                    lines_to_trim = max(1000, _ui_trim_threshold // 10)
-                    logger.info(f"UI at {_ui_trim_threshold:,} lines, trimming {lines_to_trim:,} oldest. Total on disk: {self._disk_log_lines_count:,}")
-                    
-                    # Remove oldest lines from UI (keeps newest)
-                    cursor.movePosition(QTextCursor.MoveOperation.Start)
-                    cursor.beginEditBlock()
-                    for _ in range(lines_to_trim):
-                        cursor.select(QTextCursor.SelectionType.BlockUnderCursor)
-                        cursor.removeSelectedText()
-                        cursor.deleteChar()  # Remove newline
-                    cursor.endEditBlock()
-                    
-                    self._ui_lines_count = doc.blockCount()
-                    
-                    # Update UI start line tracker (oldest line now shown)
-                    self._ui_start_line += lines_to_trim
-                    
-                    logger.debug(f"UI now shows lines {self._ui_start_line + 1:,} to {self._ui_end_line:,} of {self._disk_log_lines_count:,}")
-                    
-                    # Update "Load Older" bar visibility
+                self._ui_start_line = max(
+                    0, self._disk_log_lines_count - self._ui_lines_count
+                )
+
+                if self._ui_start_line > 0:
                     self._update_load_older_bar()
-                    
-                    # Update label to show disk buffer status
                     if hasattr(self, 'current_pod_label'):
-                        current_text = self.current_pod_label.text().split("│")[0].strip()
+                        pod_text = self.current_pod_label.text().split("│")[0].strip()
                         self.current_pod_label.setText(
-                            f"{current_text} │ {self._disk_log_lines_count:,} lines on disk "
-                            f"(showing {self._ui_start_line + 1:,}-{self._ui_end_line:,})"
+                            f"{pod_text} │ {self._disk_log_lines_count:,} lines on disk "
+                            f"(showing {self._ui_start_line + 1:,}–{self._ui_end_line:,})"
                         )
-            
-            # Memory warning check (every 30 minutes)
+
+            # ── STEP 4: memory warning + search update ────────────────────────
             self._check_memory_warning()
-            
-            # PERFORMANCE: Only update search if actively searching
+
+            # Only re-scan search when user is NOT at the bottom (actively reading)
             if self.current_search_term and not was_at_bottom:
-                # Invalidate search cache
-                self._search_cache_text = ""
-                # Only update search when user is viewing results
+                self._search_cache_text = ""  # Invalidate cache
                 old_count = len(self.search_occurrences)
                 self.search_occurrences = self._find_all_occurrences(self.current_search_term)
-                new_count = len(self.search_occurrences)
-                
                 self._update_match_counter()
-                
-                if self.current_occurrence_index >= 0 and self.current_occurrence_index < len(self.search_occurrences):
+                if (self.current_occurrence_index >= 0 and
+                        self.current_occurrence_index < len(self.search_occurrences)):
                     self._jump_to_occurrence(self.current_occurrence_index)
-                
-                if new_count > old_count:
-                    logger.debug(f"Search results updated: {old_count} -> {new_count} occurrences")
-            
-            # Smart scroll: Only auto-scroll if user was at bottom
+
             if was_at_bottom:
                 self.log_output.moveCursor(QTextCursor.MoveOperation.End)
                 self.log_output.ensureCursorVisible()
-                
+
         except Exception as e:
             logger.error(f"Error flushing log batch: {e}", exc_info=True)
-            # Clear batch to prevent infinite loops
             self._log_append_batch.clear()
     
     # -------------------------
@@ -3025,8 +2931,14 @@ class MainWindow(QWidget):
                 color: {theme_class.log_text};
             }}
         """
+        log_style = f"""
+            QPlainTextEdit {{
+                background-color: {theme_class.log_background};
+                color: {theme_class.log_text};
+            }}
+        """
         self.console_output.setStyleSheet(console_style)
-        self.log_output.setStyleSheet(console_style)
+        self.log_output.setStyleSheet(log_style)
         
         # Update metrics label color (theme-aware)
         self.metrics_label.setStyleSheet(
@@ -4588,21 +4500,15 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
             AppConfig.set_log_buffer_limit(new_limit)
             AppConfig.set_show_memory_warnings(show_warnings_check.isChecked())
 
-            # Disk buffering is always enabled — only the threshold differs.
-            # When Limited mode is active, reset to defaults (disk buffering never runs there).
-            AppConfig.set_disk_buffer_enabled(True)
-            AppConfig.set_disk_buffer_limit(0)  # always keep the full file
             if new_limit > 0:
+                # Limited mode: Qt caps at user line limit; no scroll-back threshold.
                 AppConfig.set_ui_trim_threshold(100_000)
-            else:
-                new_trim = 100_000 if trim_default_radio.isChecked() else trim_spin.value()
-                AppConfig.set_ui_trim_threshold(new_trim)
-
-            # Apply buffer limit to current log output
-            if new_limit > 0:
                 self.log_output.document().setMaximumBlockCount(new_limit)
             else:
-                self.log_output.document().setMaximumBlockCount(0)  # unlimited
+                # Unlimited mode: cap UI at the scroll-back threshold.
+                new_trim = 100_000 if trim_default_radio.isChecked() else trim_spin.value()
+                AppConfig.set_ui_trim_threshold(new_trim)
+                self.log_output.document().setMaximumBlockCount(new_trim)
             
             QMessageBox.information(
                 self,

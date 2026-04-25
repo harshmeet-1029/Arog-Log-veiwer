@@ -224,20 +224,6 @@ class AppConfig:
         logger.debug("Config cache invalidated")
     
     @staticmethod
-    def get_cache_stats() -> dict:
-        """
-        Get cache statistics for debugging.
-        
-        Returns:
-            Dictionary with cache status information
-        """
-        return {
-            'cached': AppConfig._config_cache is not None,
-            'cache_mtime': AppConfig._cache_mtime,
-            'cache_size': len(AppConfig._config_cache) if AppConfig._config_cache else 0
-        }
-    
-    @staticmethod
     def load_config() -> dict:
         """
         Load configuration from file with smart caching.
@@ -431,19 +417,6 @@ class AppConfig:
         config['word_wrap'] = enabled
         AppConfig.save_config(config)
     
-    @staticmethod
-    def get_disk_buffer_enabled() -> bool:
-        """Get whether disk buffering is enabled (default: True)."""
-        config = AppConfig.load_config()
-        return config.get('disk_buffer_enabled', True)
-
-    @staticmethod
-    def set_disk_buffer_enabled(enabled: bool) -> None:
-        """Set whether disk buffering is enabled."""
-        config = AppConfig.load_config()
-        config['disk_buffer_enabled'] = enabled
-        AppConfig.save_config(config)
-
     @staticmethod
     def get_disk_buffer_limit() -> int:
         """Get the disk buffer line limit (0 = unlimited)."""

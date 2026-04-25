@@ -279,7 +279,7 @@ class SSHConnectionManager:
             # Read available data
             try:
                 if self.shell.recv_ready():
-                    data = self.shell.recv(4096).decode(errors="ignore")
+                    data = self.shell.recv(65536).decode(errors="ignore")
                     chunk_count += 1
                     total_bytes += len(data)
                     
