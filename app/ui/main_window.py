@@ -2985,8 +2985,8 @@ class MainWindow(QWidget):
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title_label)
         
-        # Version
-        version_label = QLabel("Version 1.0.0")
+        # Version — read dynamically so it always matches pyproject.toml / build metadata
+        version_label = QLabel(f"Version {UpdateConfig.get_current_version()}")
         version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         version_label.setStyleSheet("color: gray;")
         layout.addWidget(version_label)
