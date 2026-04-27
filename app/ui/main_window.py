@@ -12,7 +12,6 @@ import stat
 import sys
 import webbrowser
 from pathlib import Path
-from typing import Optional as Opt_Type
 
 # ── Third-party (Qt) ────────────────────────────────────────────────────────
 from PySide6.QtWidgets import (
@@ -45,6 +44,9 @@ class _DiskWriter(_threading.Thread):
     """
     Non-blocking background disk writer.
     All writes are queued and drained by a daemon thread so the GUI is never blocked.
+
+    Callers can detect a hard failure via the `failed` property; once True the
+    thread has stopped and no further data will be written to disk.
     """
 
     _FLUSH = object()  # Sentinel: flush file and signal caller
@@ -54,22 +56,39 @@ class _DiskWriter(_threading.Thread):
         self._path = path
         self._q: _queue.Queue = _queue.Queue()
         self._file = open(path, 'w', encoding='utf-8', buffering=65536)
+        self._failed = False  # Set True if the thread crashes (e.g. disk full)
         self.start()
+
+    @property
+    def failed(self) -> bool:
+        """True if the background write thread has crashed."""
+        return self._failed
 
     def write(self, text: str) -> None:
         """Queue text for background writing (returns instantly)."""
-        self._q.put(text)
+        if not self._failed:
+            self._q.put(text)
 
-    def flush_and_wait(self) -> None:
-        """Block until all queued writes are physically on disk (for Save Logs)."""
+    def flush_and_wait(self) -> bool:
+        """
+        Block until all queued writes are physically on disk.
+        Returns True on success, False on timeout or prior failure.
+        """
+        if self._failed:
+            return False
         done = _threading.Event()
         self._q.put((self._FLUSH, done))
-        done.wait(timeout=30)
+        flushed = done.wait(timeout=30)
+        if not flushed:
+            logger.error("DiskWriter flush_and_wait timed out after 30 s")
+        return flushed and not self._failed
 
     def close(self) -> None:
         """Drain queue, flush, and close. Blocks until complete."""
         self._q.put(None)  # Shutdown sentinel
-        self.join(timeout=30)
+        joined = self.join(timeout=30)
+        if self.is_alive():
+            logger.error("DiskWriter thread did not exit within 30 s timeout")
 
     def run(self) -> None:
         try:
@@ -85,10 +104,8 @@ class _DiskWriter(_threading.Thread):
                 else:
                     self._file.write(item)
         except Exception:
-            import logging as _logging
-            _logging.getLogger(__name__).error(
-                "DiskWriter thread crashed", exc_info=True
-            )
+            self._failed = True
+            logger.error("DiskWriter thread crashed — disk writes will be disabled", exc_info=True)
             # Drain the queue and unblock any pending flush_and_wait callers
             try:
                 while True:
@@ -143,7 +160,7 @@ class MainWindow(QWidget):
         self._is_streaming_logs = False  # Track if actively streaming logs (CRASH PROTECTION)
         
         # Update state
-        self.pending_update: Opt_Type[UpdateInfo] = None
+        self.pending_update: Optional[UpdateInfo] = None
         
         # Theme state
         self.current_theme = "dark"
@@ -156,11 +173,13 @@ class MainWindow(QWidget):
         self.current_search_term = ""
         self.search_occurrences = []
         self.current_occurrence_index = -1
+        self._disk_search_total = 0  # Full-disk match count from _search_all_logs (0 = UI-only search)
         
         # PERFORMANCE: Batch log lines before UI update
         self._log_append_batch = []
         self._batch_timer = None
-        self._search_cache_text = ""  # Cache key for search optimization
+        self._search_cache_text = ""    # Cache key for search optimization
+        self._doc_revision = 0          # Incremented on every UI insert; included in cache key
         
         # METRICS: Last known reading (shown when metrics stop/error)
         self._last_metrics_cpu = ""
@@ -338,7 +357,7 @@ class MainWindow(QWidget):
         try:
             doc = self.log_output.document()
             use_regex = hasattr(self, '_regex_btn') and self._regex_btn.isChecked()
-            cache_key = f"{search_text}:{doc.blockCount()}:{use_regex}"
+            cache_key = f"{search_text}:{doc.blockCount()}:{use_regex}:{self._doc_revision}"
 
             if cache_key == self._search_cache_text and hasattr(self, '_cached_occurrences'):
                 return self._cached_occurrences
@@ -385,13 +404,23 @@ class MainWindow(QWidget):
         if not self.current_search_term:
             self.match_counter_label.setText("")
             return
-        
-        total = len(self.search_occurrences)
-        if total == 0:
-            self.match_counter_label.setText("No matches")
+
+        visible = len(self.search_occurrences)
+        if visible == 0:
+            if self._disk_search_total > 0:
+                self.match_counter_label.setText(
+                    f"No matches in view  ({self._disk_search_total:,} total in all logs)"
+                )
+            else:
+                self.match_counter_label.setText("No matches")
         else:
             current = self.current_occurrence_index + 1 if self.current_occurrence_index >= 0 else 0
-            self.match_counter_label.setText(f"{current} of {total}")
+            if self._disk_search_total > visible:
+                self.match_counter_label.setText(
+                    f"{current} of {visible}  ({self._disk_search_total:,} total in all logs)"
+                )
+            else:
+                self.match_counter_label.setText(f"{current} of {visible}")
     
     def _jump_to_occurrence(self, index):
         """Jump to a specific occurrence by index."""
@@ -1121,8 +1150,9 @@ class MainWindow(QWidget):
         self._ui_start_line = 0
         self._ui_end_line = 0
         self._ui_lines_count = 0
+        self._doc_revision = 0  # New pod session — old search cache positions are invalid
         self.load_older_bar.setVisible(False)  # Hide load older bar initially
-        
+
         self.log_output.clear()
         self.current_pod_label.setText(f"Viewing logs for: {pod_name}")
         self.current_pod_for_metrics = pod_name
@@ -1182,12 +1212,18 @@ class MainWindow(QWidget):
         # CRITICAL: Clear streaming flag IMMEDIATELY to stop any pending operations
         self._is_streaming_logs = False
         
-        # CRITICAL: Stop and clear batch timer FIRST to prevent queued updates
+        # CRITICAL: Stop the batch timer FIRST to prevent further queued flushes
         if self._batch_timer and self._batch_timer.isActive():
             logger.debug("Stopping batch timer")
             self._batch_timer.stop()
-        
-        # CRITICAL: Clear any pending batches to prevent late UI updates
+
+        # Flush any remaining batched lines to disk BEFORE clearing — ensures the
+        # last few lines captured in the 50 ms window are not permanently lost.
+        if self._log_append_batch and self._disk_buffering_enabled and self._disk_writer:
+            logger.debug(f"Final flush of {len(self._log_append_batch)} pending batches before stop")
+            self._flush_log_batch()
+
+        # Clear any batches that remain (e.g. limited mode, or post-flush leftovers)
         if self._log_append_batch:
             logger.debug(f"Clearing {len(self._log_append_batch)} pending log batches")
             self._log_append_batch.clear()
@@ -1553,7 +1589,7 @@ class MainWindow(QWidget):
     
     def _search_ui_logs(self, search_text: str):
         """Search only currently visible logs in UI (fast)."""
-        # Store the search term
+        self._disk_search_total = 0  # No disk search — clear the disk total
         self.current_search_term = search_text
         
         # Find all occurrences in UI
@@ -1639,6 +1675,7 @@ class MainWindow(QWidget):
             progress.close()
             
             if total_matches > 0:
+                self._disk_search_total = total_matches  # Persist so counter shows "X visible / Y total"
                 # Found matches! Load the section with first match
                 logger.info(f"Found {total_matches} matches, first at line {first_match_line + 1}")
                 
@@ -1759,6 +1796,7 @@ class MainWindow(QWidget):
         self.current_search_term = ""
         self.search_occurrences = []
         self.current_occurrence_index = -1
+        self._disk_search_total = 0
         
         # Clear any text selection/highlighting
         cursor = self.log_output.textCursor()
@@ -1782,7 +1820,19 @@ class MainWindow(QWidget):
         if has_disk_buffer:
             # Flush any in-flight writes before reading the file
             if self._disk_writer:
-                self._disk_writer.flush_and_wait()
+                flushed = self._disk_writer.flush_and_wait()
+                if not flushed:
+                    reply = QMessageBox.question(
+                        self._get_active_window(),
+                        "Flush Timeout — Save Anyway?",
+                        "The disk writer did not finish flushing within 30 seconds.\n\n"
+                        "The saved file may be missing the most recent log lines.\n\n"
+                        "Save anyway?",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                        QMessageBox.StandardButton.No,
+                    )
+                    if reply != QMessageBox.StandardButton.Yes:
+                        return
             log_source = "disk"
             logger.info(f"Saving FULL logs from disk buffer ({self._disk_log_lines_count:,} lines)")
         else:
@@ -1909,7 +1959,7 @@ class MainWindow(QWidget):
         doc = self.log_output.document()
         block_count = doc.blockCount()
 
-        # Guard 1: older logs are on disk — clipboard would be incomplete
+        # Guard 1: lines missing from the top (older, not yet loaded)
         if self._ui_start_line > 0:
             QMessageBox.information(
                 self._get_active_window(),
@@ -1917,6 +1967,19 @@ class MainWindow(QWidget):
                 f"{self._ui_start_line:,} older lines are stored on disk and are NOT visible in the UI.\n\n"
                 "Copying now would give you an incomplete log.\n\n"
                 "Use  Save Logs  to get the complete history as a text file."
+            )
+            return
+
+        # Guard 1b: lines missing from the bottom (trimmed when "Load older" was used)
+        if self._disk_buffering_enabled and self._ui_end_line < self._disk_log_lines_count:
+            missing_bottom = self._disk_log_lines_count - self._ui_end_line
+            QMessageBox.information(
+                self._get_active_window(),
+                "Incomplete Copy — Use Save Logs",
+                f"{missing_bottom:,} recent lines were pushed off the bottom when older lines were loaded "
+                "and are NOT visible in the UI.\n\n"
+                "Copying now would give you an incomplete log.\n\n"
+                "Use  Save Logs  or  Load All  first to restore the full view."
             )
             return
 
@@ -2516,6 +2579,13 @@ class MainWindow(QWidget):
         except Exception as e:
             logger.error(f"Error initializing disk buffer: {e}", exc_info=True)
             self._disk_buffering_enabled = False
+            # Close the writer if it was created before the exception, so the
+            # background thread and file handle are not leaked.
+            if self._disk_writer is not None:
+                try:
+                    self._disk_writer.close()
+                except Exception:
+                    pass
             self._disk_writer = None
     
     def _close_disk_buffer(self):
@@ -2616,6 +2686,12 @@ class MainWindow(QWidget):
                     del_cursor.removeSelectedText()
                 self._ui_end_line = new_start + ui_trim
                 logger.debug(f"Trimmed bottom to maintain {ui_trim:,} line UI limit")
+            else:
+                # No trim needed — update _ui_end_line to reflect the actual last
+                # visible line so Load All and the bar label stay accurate.
+                self._ui_end_line = min(
+                    new_start + doc.blockCount(), self._disk_log_lines_count
+                )
 
             # Re-enable auto-trim for normal streaming
             doc.setMaximumBlockCount(ui_trim)
@@ -2868,6 +2944,11 @@ class MainWindow(QWidget):
 
             # ── STEP 1: queue disk write (returns instantly) ──────────────────
             if self._disk_buffering_enabled and self._disk_writer:
+                # Detect a crashed writer (e.g. disk full) and disable buffering
+                if self._disk_writer.failed:
+                    logger.error("DiskWriter has failed — disabling disk buffering")
+                    self._disk_buffering_enabled = False
+            if self._disk_buffering_enabled and self._disk_writer:
                 try:
                     self._disk_writer.write(combined_text)
                     lines_written = combined_text.count('\n')
@@ -2919,6 +3000,7 @@ class MainWindow(QWidget):
             cursor.movePosition(QTextCursor.MoveOperation.End)
             cursor.insertText(combined_text)
             self.log_output.setUpdatesEnabled(True)
+            self._doc_revision += 1  # Invalidate any cached search positions
 
             self._ui_lines_count = self.log_output.document().blockCount()
 
@@ -4859,11 +4941,14 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
             self.metrics_worker.stop()
             self.metrics_worker.wait(2000)
         
-        # Stop any running worker
+        # Stop any running worker — terminate if it doesn't exit cleanly
         if self.worker and self.worker.isRunning():
             logger.info("Stopping active worker thread")
             self.worker.stop()
-            self.worker.wait(2000)
+            if not self.worker.wait(2000):
+                logger.warning("Worker thread did not stop on close — forcing termination")
+                self.worker.terminate()
+                self.worker.wait()
         
         # Disconnect metrics SSH
         if self.ssh_manager_metrics and self.ssh_manager_metrics.is_connected():

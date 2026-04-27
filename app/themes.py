@@ -206,6 +206,16 @@ class BaseTheme:
                 background-color: {cls.primary_accent};
                 color: white;
             }}
+            QPushButton:checked {{
+                background-color: {cls.primary_accent};
+                color: white;
+                border-color: {cls.primary_accent};
+            }}
+            QPushButton:checked:hover {{
+                background-color: {cls.button_hover};
+                color: {cls.text_color};
+                border-color: {cls.primary_accent};
+            }}
             QPushButton:disabled {{
                 background-color: {cls.background_color};
                 color: #666666;
