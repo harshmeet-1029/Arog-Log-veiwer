@@ -2640,12 +2640,18 @@ class MainWindow(QWidget):
         """
         Load ALL logs from disk into UI.
 
-        WARNING: May be slow for huge logs! Shows confirmation for large files.
+        Two-phase design to avoid reentrancy corruption:
+          PHASE 1 — Read data from disk into memory (progress dialog fires
+                     QApplication::processEvents here, which is safe because
+                     we have not yet disabled setMaximumBlockCount).
+          PHASE 2 — Insert collected text into the widget atomically, with
+                     no progress calls so no event processing can re-enable
+                     the block-count cap mid-insert.
 
-        NOTE: After repeated "Load N older" calls, lines can be missing from BOTH
-        the top (_ui_start_line > 0) AND the bottom (_ui_end_line < total), because
-        every "Load older" prepend triggers a bottom-trim to stay within the UI cap.
-        This method loads both missing sections.
+        After repeated "Load N older" calls, lines can be missing from BOTH
+        the top (_ui_start_line > 0) AND the bottom (_ui_end_line < total),
+        because every "Load older" prepend triggers a bottom-trim. Both gaps
+        are filled here.
         """
         try:
             if not self._disk_log_path or not self._disk_log_path.exists():
@@ -2654,17 +2660,16 @@ class MainWindow(QWidget):
 
             total_lines = self._disk_log_lines_count
 
-            # Missing at the top (older lines, not yet loaded)
-            missing_top = self._ui_start_line
-            # Missing at the bottom (recent lines trimmed out by a previous "Load older")
-            missing_bottom = max(0, total_lines - self._ui_end_line)
-            lines_to_load = missing_top + missing_bottom
+            # Snapshot the boundaries that define what is currently missing.
+            missing_top    = self._ui_start_line                       # lines 0 … missing_top-1
+            bottom_start   = self._ui_end_line                         # first line not in UI
+            missing_bottom = max(0, total_lines - bottom_start)        # lines bottom_start … total-1
+            lines_to_load  = missing_top + missing_bottom
 
             if lines_to_load <= 0:
                 QMessageBox.information(self, "All Loaded", "All logs are already loaded.")
                 return
 
-            # Warn for huge total log sets
             if total_lines > AppConfig.get_ui_trim_threshold():
                 file_size_mb = self._disk_log_path.stat().st_size / 1024 / 1024
                 reply = QMessageBox.question(
@@ -2674,15 +2679,19 @@ class MainWindow(QWidget):
                     f"This may take a few seconds and use ~{total_lines * 0.002:.0f} MB of RAM.\n\n"
                     "Continue?",
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                    QMessageBox.StandardButton.No
+                    QMessageBox.StandardButton.No,
                 )
                 if reply != QMessageBox.StandardButton.Yes:
                     return
 
             logger.info(
-                f"Loading ALL logs: missing_top={missing_top:,} missing_bottom={missing_bottom:,}"
+                f"Loading ALL logs: missing_top={missing_top:,}  "
+                f"missing_bottom={missing_bottom:,}"
             )
 
+            # ── PHASE 1: read from disk ───────────────────────────────────────
+            # setMaximumBlockCount is still active here, so processEvents() from
+            # the progress dialog cannot corrupt the existing UI content.
             from PySide6.QtWidgets import QProgressDialog
             progress = QProgressDialog(
                 "Loading all logs from disk...", "Cancel", 0, lines_to_load, self
@@ -2690,62 +2699,65 @@ class MainWindow(QWidget):
             progress.setWindowModality(Qt.WindowModality.WindowModal)
             progress.setMinimumDuration(500)
 
-            chunk_size = 50_000
-            doc = self.log_output.document()
+            chunk_size  = 50_000
+            top_chunks  = []
+            bot_chunks  = []
+            loaded_so_far = 0
 
-            # Disable auto-trim so inserts don't evict lines immediately.
-            # Left at 0 after load — user explicitly chose "Load All".
+            for offset in range(0, missing_top, chunk_size):
+                if progress.wasCanceled():
+                    logger.info("Load all cancelled during top-read")
+                    return
+                end   = min(offset + chunk_size, missing_top)
+                chunk = self._read_log_lines_from_disk(offset, end)
+                if chunk:
+                    top_chunks.append(chunk)
+                loaded_so_far += end - offset
+                progress.setValue(loaded_so_far)
+
+            for offset in range(bottom_start, total_lines, chunk_size):
+                if progress.wasCanceled():
+                    logger.info("Load all cancelled during bottom-read")
+                    return
+                end   = min(offset + chunk_size, total_lines)
+                chunk = self._read_log_lines_from_disk(offset, end)
+                if chunk:
+                    bot_chunks.append(chunk)
+                loaded_so_far += end - offset
+                progress.setValue(loaded_so_far)
+
+            progress.close()  # setMaximumBlockCount still ui_trim here — safe
+
+            top_text = "".join(top_chunks)
+            bot_text = "".join(bot_chunks)
+
+            if not top_text and not bot_text:
+                return
+
+            # ── PHASE 2: insert into UI atomically ───────────────────────────
+            # Disable auto-trim AFTER reading, immediately before inserting so
+            # there is no window in which processEvents() can re-enable it.
+            # Left at 0 — user explicitly chose "Load All".
+            doc = self.log_output.document()
             doc.setMaximumBlockCount(0)
 
-            # ── Step 1: prepend lines missing from the top ────────────────────
-            if missing_top > 0:
-                top_chunks = []
-                for offset in range(0, missing_top, chunk_size):
-                    if progress.wasCanceled():
-                        logger.info("Load all cancelled by user")
-                        doc.setMaximumBlockCount(AppConfig.get_ui_trim_threshold())
-                        return
-                    end = min(offset + chunk_size, missing_top)
-                    chunk = self._read_log_lines_from_disk(offset, end)
-                    if chunk:
-                        top_chunks.append(chunk)
-                    progress.setValue(offset + chunk_size)
-
-                top_text = "".join(top_chunks)
+            if top_text:
                 cursor = self.log_output.textCursor()
                 cursor.beginEditBlock()
                 cursor.movePosition(QTextCursor.MoveOperation.Start)
                 cursor.insertText(top_text)
                 cursor.endEditBlock()
 
-            # ── Step 2: append lines missing from the bottom ─────────────────
-            if missing_bottom > 0:
-                bottom_chunks = []
-                loaded_so_far = missing_top
-                for offset in range(self._ui_end_line, total_lines, chunk_size):
-                    if progress.wasCanceled():
-                        logger.info("Load all cancelled by user")
-                        doc.setMaximumBlockCount(AppConfig.get_ui_trim_threshold())
-                        return
-                    end = min(offset + chunk_size, total_lines)
-                    chunk = self._read_log_lines_from_disk(offset, end)
-                    if chunk:
-                        bottom_chunks.append(chunk)
-                    loaded_so_far += end - offset
-                    progress.setValue(loaded_so_far)
-
-                bottom_text = "".join(bottom_chunks)
+            if bot_text:
                 cursor = self.log_output.textCursor()
                 cursor.beginEditBlock()
                 cursor.movePosition(QTextCursor.MoveOperation.End)
-                cursor.insertText(bottom_text)
+                cursor.insertText(bot_text)
                 cursor.endEditBlock()
-
-            progress.close()
 
             # Update tracking
             self._ui_start_line = 0
-            self._ui_end_line = total_lines
+            self._ui_end_line    = total_lines
             self._ui_lines_count = doc.blockCount()
 
             self._update_load_older_bar()
