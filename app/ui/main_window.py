@@ -8,9 +8,14 @@ import queue as _queue
 import threading as _threading
 import tempfile
 import os
-import stat
+import re as _re
 import sys
+import time
+import platform
+import shutil
+import subprocess
 import webbrowser
+from datetime import datetime
 from pathlib import Path
 
 # ── Third-party (Qt) ────────────────────────────────────────────────────────
@@ -19,11 +24,12 @@ from PySide6.QtWidgets import (
     QListWidget, QTextEdit, QPlainTextEdit, QLineEdit, QLabel,
     QMessageBox, QSplitter, QGroupBox, QComboBox,
     QMenuBar, QDialog, QDialogButtonBox, QFileDialog, QSizePolicy,
-    QMenu, QCheckBox, QSpinBox
+    QMenu, QCheckBox, QSpinBox, QRadioButton, QProgressDialog,
+    QApplication, QTextBrowser,
 )
-from PySide6.QtCore import Qt, QTimer, QRegularExpression
+from PySide6.QtCore import Qt, QTimer, QRegularExpression, QThread
 from PySide6.QtGui import (
-    QFont, QTextCursor, QPalette, QColor, QAction,
+    QFont, QTextCursor, QAction,
     QTextDocument, QShortcut, QKeySequence, QIcon
 )
 
@@ -53,7 +59,6 @@ class _DiskWriter(_threading.Thread):
 
     def __init__(self, path: str):
         super().__init__(daemon=True, name="ArgoLogDiskWriter")
-        self._path = path
         self._q: _queue.Queue = _queue.Queue()
         self._file = open(path, 'w', encoding='utf-8', buffering=65536)
         self._failed = False  # Set True if the thread crashes (e.g. disk full)
@@ -86,7 +91,7 @@ class _DiskWriter(_threading.Thread):
     def close(self) -> None:
         """Drain queue, flush, and close. Blocks until complete."""
         self._q.put(None)  # Shutdown sentinel
-        joined = self.join(timeout=30)
+        self.join(timeout=30)
         if self.is_alive():
             logger.error("DiskWriter thread did not exit within 30 s timeout")
 
@@ -196,9 +201,6 @@ class MainWindow(QWidget):
         # SMART SCROLL: On-demand loading for perfect UX
         self._ui_start_line = 0  # First line number shown in UI (0-based)
         self._ui_end_line = 0  # Last line number shown in UI
-        self._load_more_chunk_size = 10000  # Load 10k lines at a time
-        self._max_ui_lines = 200000  # Max lines in UI (200k for better UX on 2GB+ RAM systems)
-        
         # Auto-reconnect settings
         self.auto_reconnect_enabled = AppConfig.get_auto_reconnect()
         self.reconnect_attempts = 0
@@ -846,15 +848,9 @@ class MainWindow(QWidget):
         load_older_layout.addWidget(self.load_older_label)
         
         load_older_layout.addStretch()
-        
-        self.load_older_btn = QPushButton("⬆ Load 10,000 Older Lines")
-        self.load_older_btn.setToolTip("Load older logs from disk buffer")
-        self.load_older_btn.clicked.connect(self._load_older_logs)
-        self.load_older_btn.setMinimumHeight(28)
-        load_older_layout.addWidget(self.load_older_btn)
-        
-        self.load_all_btn = QPushButton("⬆⬆ Load All")
-        self.load_all_btn.setToolTip("Load all logs from disk (may be slow for huge logs)")
+
+        self.load_all_btn = QPushButton("⬆ Load All Logs")
+        self.load_all_btn.setToolTip("Load all logs from disk into view")
         self.load_all_btn.clicked.connect(self._load_all_logs)
         self.load_all_btn.setMinimumHeight(28)
         load_older_layout.addWidget(self.load_all_btn)
@@ -1193,7 +1189,6 @@ class MainWindow(QWidget):
         self.worker.start()
         
         # Track stream start time for memory warnings
-        import time
         self._stream_start_time = time.time()
         
         # Mark that we're actively streaming (CRASH PROTECTION flag)
@@ -1427,7 +1422,6 @@ class MainWindow(QWidget):
         self.metrics_label.setText("│ Starting metrics...")
         
         # Restart metrics monitoring
-        from PySide6.QtCore import QTimer
         QTimer.singleShot(500, self.start_metrics_monitoring)  # Quick retry
     
     def _update_metrics_display(self, metrics_text: str):
@@ -1440,7 +1434,6 @@ class MainWindow(QWidget):
             # Ignore late/stray callbacks after user stopped metrics (avoids work and races)
             if not self.is_monitoring_metrics:
                 return
-            import time
             
             # Throttle metrics UI updates to max once per 2 seconds
             current_time = time.time()
@@ -1629,7 +1622,6 @@ class MainWindow(QWidget):
             logger.info(f"Searching ALL logs ({self._disk_log_lines_count:,} lines) for: '{search_text}'")
             
             # Show progress dialog
-            from PySide6.QtWidgets import QProgressDialog
             progress = QProgressDialog(
                 f"Searching all logs for '{search_text}'...", 
                 "Cancel", 
@@ -1645,7 +1637,6 @@ class MainWindow(QWidget):
             first_match_line = -1
             total_matches = 0
 
-            import re as _re
             if use_regex:
                 try:
                     pattern = _re.compile(search_text, _re.IGNORECASE)
@@ -1854,7 +1845,6 @@ class MainWindow(QWidget):
         if not pod_name or pod_name == "No pod selected":
             pod_name = "logs"
 
-        from datetime import datetime
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         default_filename = f"{pod_name}_{timestamp}.txt"
 
@@ -1942,7 +1932,6 @@ class MainWindow(QWidget):
         cursor.select(QTextCursor.SelectionType.LineUnderCursor)
         line_text = cursor.selectedText()
         
-        from PySide6.QtWidgets import QApplication
         clipboard = QApplication.clipboard()
         clipboard.setText(line_text)
         
@@ -1954,7 +1943,6 @@ class MainWindow(QWidget):
         If older lines are on disk (trimmed from UI) or the document is very large,
         redirect the user to 'Save Logs' to avoid clipboard crashes and data loss.
         """
-        from PySide6.QtWidgets import QApplication
 
         doc = self.log_output.document()
         block_count = doc.blockCount()
@@ -2075,7 +2063,7 @@ class MainWindow(QWidget):
                 restart_box.setIcon(QMessageBox.Icon.Information)
                 
                 restart_now_btn = restart_box.addButton("Close now", QMessageBox.ButtonRole.AcceptRole)
-                restart_later_btn = restart_box.addButton("Keep working", QMessageBox.ButtonRole.RejectRole)
+                restart_box.addButton("Keep working", QMessageBox.ButtonRole.RejectRole)
                 restart_box.setDefaultButton(restart_now_btn)
                 
                 restart_box.exec()
@@ -2267,7 +2255,6 @@ class MainWindow(QWidget):
             logger.info("Creating separate SSH connection for metrics monitoring")
             self.console_output.append("[INFO] Setting up metrics monitoring connection...\n")
             
-            from PySide6.QtCore import QThread
             
             class MetricsConnectionWorker(QThread):
                 def __init__(self, parent):
@@ -2277,7 +2264,6 @@ class MainWindow(QWidget):
                 
                 def run(self):
                     try:
-                        from app.ssh.connection_manager import SSHConnectionManager
                         self.ssh_manager = SSHConnectionManager()
                         self.ssh_manager.connect()
                     except Exception as e:
@@ -2451,7 +2437,6 @@ class MainWindow(QWidget):
             if not temp_dir.exists():
                 return
             
-            import time
             current_time = time.time()
             cleaned_count = 0
             cleaned_size = 0
@@ -2482,7 +2467,6 @@ class MainWindow(QWidget):
                         # Try to check if process exists (works on Unix and Windows)
                         try:
                             if os.name == 'nt':  # Windows
-                                import subprocess
                                 result = subprocess.run(['tasklist', '/FI', f'PID eq {pid}'], 
                                                        capture_output=True, text=True)
                                 process_exists = str(pid) in result.stdout
@@ -2551,7 +2535,6 @@ class MainWindow(QWidget):
             # Check disk space (need ≥ 1 GB)
             temp_dir = Path(tempfile.gettempdir()) / "argo_log_viewer_buffers"
             temp_dir.mkdir(exist_ok=True)
-            import shutil
             free_gb = shutil.disk_usage(temp_dir).free / (1024 ** 3)
 
             if free_gb < 1.0:
@@ -2608,109 +2591,42 @@ class MainWindow(QWidget):
     
     def _update_load_older_bar(self):
         """
-        Update the load older logs bar visibility and text.
-        
-        Shows bar if there are older logs not currently displayed in UI.
+        Show the bar whenever any lines are missing from the UI (top or bottom).
+        The bar contains a label and the single "Load All Logs" button.
         """
         try:
             if not self._disk_buffering_enabled or not self._disk_log_path or not self._disk_log_path.exists():
                 self.load_older_bar.setVisible(False)
                 return
-            
-            # Check if there are older logs not shown
-            if self._ui_start_line > 0:
-                older_lines = self._ui_start_line
-                self.load_older_label.setText(
-                    f"📄 {older_lines:,} older lines available on disk "
-                    f"(Showing lines {self._ui_start_line + 1:,} to {self._ui_end_line:,} of {self._disk_log_lines_count:,})"
-                )
-                self.load_older_bar.setVisible(True)
-                logger.debug(f"Load older bar visible: {older_lines:,} older lines available")
-            else:
+
+            missing_top    = self._ui_start_line
+            missing_bottom = max(0, self._disk_log_lines_count - self._ui_end_line)
+
+            if missing_top <= 0 and missing_bottom <= 0:
                 self.load_older_bar.setVisible(False)
-                
+                return
+
+            if missing_top > 0 and missing_bottom > 0:
+                label = (
+                    f"📄 {missing_top:,} older + {missing_bottom:,} recent lines not in view  "
+                    f"(Showing {self._ui_start_line + 1:,}–{self._ui_end_line:,} of {self._disk_log_lines_count:,})"
+                )
+            elif missing_top > 0:
+                label = (
+                    f"📄 {missing_top:,} older lines on disk not yet loaded  "
+                    f"(Showing {self._ui_start_line + 1:,}–{self._ui_end_line:,} of {self._disk_log_lines_count:,})"
+                )
+            else:
+                label = (
+                    f"⚠ {missing_bottom:,} recent lines are off screen — click Load All Logs to restore"
+                )
+
+            self.load_older_label.setText(label)
+            self.load_older_bar.setVisible(True)
+
         except Exception as e:
             logger.error(f"Error updating load older bar: {e}", exc_info=True)
             self.load_older_bar.setVisible(False)
-    
-    def _load_older_logs(self):
-        """
-        Load older logs from disk buffer (10k lines at a time).
-        
-        SMART SCROLLING: Loads older logs on demand for perfect UX!
-        """
-        try:
-            if not self._disk_log_path or not self._disk_log_path.exists():
-                QMessageBox.warning(self, "No Older Logs", "No older logs available on disk.")
-                return
-            
-            if self._ui_start_line <= 0:
-                QMessageBox.information(self, "All Loaded", "All logs are already loaded in the UI.")
-                return
-            
-            logger.info(f"Loading older logs: start={self._ui_start_line}, chunk={self._load_more_chunk_size}")
-            
-            # Calculate how many lines to load
-            lines_to_load = min(self._load_more_chunk_size, self._ui_start_line)
-            new_start = self._ui_start_line - lines_to_load
-            
-            # Read the specific range from disk file
-            older_text = self._read_log_lines_from_disk(new_start, self._ui_start_line)
-            
-            if not older_text:
-                QMessageBox.warning(self, "Load Error", "Could not load older logs from disk.")
-                return
-            
-            doc = self.log_output.document()
-            ui_trim = AppConfig.get_ui_trim_threshold()
-
-            # Temporarily disable auto-trim so we can insert at the top without Qt
-            # immediately removing the lines we just loaded (it removes from the top).
-            doc.setMaximumBlockCount(0)
-
-            cursor = self.log_output.textCursor()
-            cursor.beginEditBlock()
-            cursor.movePosition(QTextCursor.MoveOperation.Start)
-            cursor.insertText(older_text)
-            cursor.endEditBlock()
-
-            # Trim from the BOTTOM if we now exceed the limit (single fast operation).
-            if doc.blockCount() > ui_trim:
-                keep_block = doc.findBlockByNumber(ui_trim - 1)
-                if keep_block.isValid():
-                    del_cursor = QTextCursor(doc)
-                    del_cursor.setPosition(keep_block.position() + keep_block.length())
-                    del_cursor.movePosition(
-                        QTextCursor.MoveOperation.End, QTextCursor.MoveMode.KeepAnchor
-                    )
-                    del_cursor.removeSelectedText()
-                self._ui_end_line = new_start + ui_trim
-                logger.debug(f"Trimmed bottom to maintain {ui_trim:,} line UI limit")
-            else:
-                # No trim needed — update _ui_end_line to reflect the actual last
-                # visible line so Load All and the bar label stay accurate.
-                self._ui_end_line = min(
-                    new_start + doc.blockCount(), self._disk_log_lines_count
-                )
-
-            # Re-enable auto-trim for normal streaming
-            doc.setMaximumBlockCount(ui_trim)
-
-            # Update tracking
-            self._ui_start_line = new_start
-            self._ui_lines_count = doc.blockCount()
-            
-            # Update UI
-            self._update_load_older_bar()
-            logger.info(f"✓ Loaded {lines_to_load:,} older lines (now showing {self._ui_start_line + 1:,} to {self._ui_end_line:,})")
-            
-            # Keep scroll position at top (user wanted to see older logs)
-            self.log_output.moveCursor(QTextCursor.MoveOperation.Start)
-            self.log_output.ensureCursorVisible()
-            
-        except Exception as e:
-            logger.error(f"Error loading older logs: {e}", exc_info=True)
-            QMessageBox.critical(self, "Error", f"Failed to load older logs: {str(e)}")
     
     def _load_all_logs(self):
         """
@@ -2768,7 +2684,6 @@ class MainWindow(QWidget):
             # ── PHASE 1: read from disk ───────────────────────────────────────
             # setMaximumBlockCount is still active here, so processEvents() from
             # the progress dialog cannot corrupt the existing UI content.
-            from PySide6.QtWidgets import QProgressDialog
             progress = QProgressDialog(
                 "Loading all logs from disk...", "Cancel", 0, lines_to_load, self
             )
@@ -3026,7 +2941,6 @@ class MainWindow(QWidget):
             # Only re-scan search when user is NOT at the bottom (actively reading)
             if self.current_search_term and not was_at_bottom:
                 self._search_cache_text = ""  # Invalidate cache
-                old_count = len(self.search_occurrences)
                 self.search_occurrences = self._find_all_occurrences(self.current_search_term)
                 self._update_match_counter()
                 if (self.current_occurrence_index >= 0 and
@@ -3175,7 +3089,7 @@ class MainWindow(QWidget):
         layout.addSpacing(15)
         
         # Copyright
-        copyright_label = QLabel(f"© 2024-2026 Harshmeet Singh. All rights reserved.")
+        copyright_label = QLabel("© 2024-2026 Harshmeet Singh. All rights reserved.")
         copyright_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         copyright_label.setStyleSheet("color: gray; font-size: 9pt;")
         layout.addWidget(copyright_label)
@@ -3249,7 +3163,6 @@ class MainWindow(QWidget):
         shortcuts_text.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
         
         # Determine platform-specific key
-        import platform
         if platform.system() == "Darwin":
             ctrl_key = "Cmd"
         else:
@@ -3386,7 +3299,6 @@ class MainWindow(QWidget):
         ssh_config_text.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
         
         # Detect current OS
-        import platform
         current_os = platform.system()
         
         # Determine theme-specific colors
@@ -3396,7 +3308,6 @@ class MainWindow(QWidget):
             code_bg = "#2b2b2b"
             code_fg = "#4af626"
             highlight_color = "#2196f3"
-            text_color = "#e0e0e0"
             hr_color = "#555"
         else:
             table_bg = "#f5f5f5"
@@ -3404,7 +3315,6 @@ class MainWindow(QWidget):
             code_bg = "#f0f0f0"
             code_fg = "#c7254e"
             highlight_color = "#2196f3"
-            text_color = "#212121"
             hr_color = "#ddd"
         
         ssh_config_content = f"""
@@ -3827,7 +3737,6 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
     
     def _check_for_updates_background(self):
         """Check for updates in the background (non-blocking)."""
-        from PySide6.QtCore import QThread
         
         logger.info("Starting background update check")
         
@@ -3863,7 +3772,6 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
         self.console_output.append("\n[INFO] Checking for updates...\n")
         
         # Check in background
-        from PySide6.QtCore import QThread
         
         class UpdateCheckThread(QThread):
             def __init__(self, parent):
@@ -3874,7 +3782,6 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
             def run(self):
                 try:
                     # Clear cache and force fresh detection BEFORE checking for updates
-                    from app.config import AppConfig
                     AppConfig.clear_installation_metadata()
                     AppConfig.get_installation_metadata()  # This will re-detect
                     
@@ -3911,7 +3818,6 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
             f"<i>If this looks incorrect, click 'Refresh Detection' to re-detect.</i>"
         )
         
-        from PySide6.QtWidgets import QMessageBox, QPushButton
         
         msg_box = QMessageBox(self)
         msg_box.setWindowTitle("Installation Information")
@@ -3921,7 +3827,7 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
         
         # Add custom buttons
         refresh_btn = msg_box.addButton("Refresh Detection", QMessageBox.ActionRole)
-        close_btn = msg_box.addButton("Close", QMessageBox.RejectRole)
+        msg_box.addButton("Close", QMessageBox.RejectRole)
         
         msg_box.exec()
         
@@ -3941,7 +3847,6 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
         logger.info(f"Re-detected metadata: {new_metadata}")
         
         # Show new info
-        from PySide6.QtWidgets import QMessageBox
         
         # Get app version
         app_version = new_metadata.get('version', 'Unknown')
@@ -4055,7 +3960,7 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
         
         # Title
         if update_info.is_critical:
-            title_label = QLabel(f"Critical Update Available")
+            title_label = QLabel("Critical Update Available")
             title_label.setStyleSheet("color: orange; font-weight: bold; font-size: 14pt;")
         else:
             title_label = QLabel(f"New Version Available: v{update_info.version}")
@@ -4149,7 +4054,6 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
     
     def _show_download_progress_dialog(self, update_info: UpdateInfo):
         """Show download progress dialog and start download."""
-        from PySide6.QtWidgets import QProgressDialog
         from app.update_downloader import UpdateDownloaderThread, get_downloads_folder
         
         # Portable builds + DEB → save to Downloads so user can keep the file.
@@ -4232,9 +4136,6 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
     
     def _verify_and_install(self, file_path: str, update_info: UpdateInfo):
         """Verify checksum and install update."""
-        from PySide6.QtWidgets import QProgressDialog
-        from app.update_downloader import UpdateDownloader
-        
         # Show verification progress
         verify_dialog = QProgressDialog(
             "Verifying download integrity...",
@@ -4248,7 +4149,6 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
         verify_dialog.setCancelButton(None)
         verify_dialog.show()
         
-        from PySide6.QtCore import QTimer
         QTimer.singleShot(100, lambda: self._do_verification(file_path, update_info, verify_dialog))
     
     def _do_verification(self, file_path: str, update_info: UpdateInfo, verify_dialog):
@@ -4312,7 +4212,6 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
                     "Please try downloading again."
                 )
                 # Clean up
-                import os
                 if os.path.exists(file_path):
                     os.remove(file_path)
         
@@ -4328,7 +4227,6 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
     def _install_update(self, file_path: str, update_info: UpdateInfo):
         """Install the downloaded update."""
         from app.update_downloader import InstallerLauncher
-        from app.config import AppConfig
         
         logger.info(f"Installing update from {file_path}")
         
@@ -4341,8 +4239,6 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
         if result['success']:
             if result['action'] == 'launched':
                 logger.info("Installer launched, exiting app now")
-                from PySide6.QtWidgets import QApplication
-                from PySide6.QtCore import QTimer
                 if result.get('message'):
                     # e.g. Linux terminal opened — user needs to read and confirm
                     msg_box = QMessageBox(self)
@@ -4376,7 +4272,6 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
                     copy_btn = msg_box.addButton("Copy Command", QMessageBox.ButtonRole.ActionRole)
                     
                     def copy_command():
-                        from PySide6.QtWidgets import QApplication
                         QApplication.clipboard().setText(result['install_command'])
                     
                     copy_btn.clicked.connect(copy_command)
@@ -4385,7 +4280,6 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
                 
                 # Exit if needs manual steps
                 if result.get('needs_manual'):
-                    from PySide6.QtWidgets import QApplication
                     QApplication.quit()
         else:
             # Error occurred
@@ -4403,7 +4297,6 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
         if not self._stream_start_time:
             return
         
-        import time
         current_time = time.time()
         stream_duration = current_time - self._stream_start_time
         
@@ -4437,7 +4330,7 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
         )
         
         save_btn = msg.addButton("Save Logs Now", QMessageBox.ButtonRole.ActionRole)
-        continue_btn = msg.addButton("Continue Streaming", QMessageBox.ButtonRole.AcceptRole)
+        msg.addButton("Continue Streaming", QMessageBox.ButtonRole.AcceptRole)
         settings_btn = msg.addButton("Settings", QMessageBox.ButtonRole.ActionRole)
         dont_show_btn = msg.addButton("Don't Show Again", QMessageBox.ButtonRole.RejectRole)
         
@@ -4467,7 +4360,6 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
         layout.addWidget(desc)
         
         # Buffer limit option
-        from PySide6.QtWidgets import QRadioButton, QSpinBox
         
         buffer_group = QGroupBox("Log Buffer Limit")
         buffer_layout = QVBoxLayout()
@@ -4520,7 +4412,6 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
         layout.addWidget(buffer_group)
         
         # Memory warnings option
-        from PySide6.QtWidgets import QCheckBox
         
         warnings_group = QGroupBox("Memory Warnings")
         warnings_layout = QVBoxLayout()
@@ -4656,7 +4547,6 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
         layout = QVBoxLayout()
         
         # Create text browser for scrollable content
-        from PySide6.QtWidgets import QTextBrowser
         guide = QTextBrowser()
         guide.setOpenExternalLinks(True)
         

@@ -11,7 +11,7 @@ import os
 import sys
 import platform
 import logging
-from typing import Dict, Optional
+from typing import Dict
 
 logger = logging.getLogger(__name__)
 

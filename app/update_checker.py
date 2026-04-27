@@ -302,25 +302,7 @@ class UpdateChecker:
             if asset.get('name') == 'CHECKSUMS.txt':
                 return asset.get('browser_download_url')
         return None
-    
-    @staticmethod
-    def _is_newer_version(remote_version: str, current_version: str) -> bool:
-        """
-        Compare version strings.
-        
-        Args:
-            remote_version: Version from update server
-            current_version: Current application version
-            
-        Returns:
-            True if remote version is newer
-        """
-        try:
-            return version.parse(remote_version) > version.parse(current_version)
-        except Exception as e:
-            logger.error(f"Error comparing versions: {e}")
-            return False
-    
+
     @staticmethod
     def mark_update_checked() -> None:
         """Mark that we've checked for updates (updates timestamp)."""
