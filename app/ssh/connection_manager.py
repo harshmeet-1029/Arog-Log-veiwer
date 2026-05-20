@@ -5,6 +5,8 @@ Maintains stateful SSH chain: Windows -> usejump -> 10.0.34.231 -> sudo su -
 import re
 import time
 import os
+import shlex
+import subprocess
 import paramiko
 from typing import Optional, Callable
 from app.logging_config import get_logger
@@ -17,11 +19,15 @@ class SSHConnectionManager:
     """
     Manages a stateful SSH connection chain with prompt detection.
     
-    Connection flow:
+    ECR flow:
     1. SSH to jump host (usejump)
     2. SSH to internal server (10.0.34.231)
     3. sudo su - solutions01-prod-us-east-1-eks
     4. Execute kubectl commands in that context
+
+    GCP flow:
+    1. Validate GCP SSH command from env/secret
+    2. Execute kubectl commands through gcloud ssh --command
     """
     
     # Prompt patterns to detect command completion
@@ -31,7 +37,11 @@ class SSHConnectionManager:
         r'>\s*$',               # Simple > prompt
     ]
     
-    def __init__(self, output_callback: Optional[Callable[[str], None]] = None):
+    def __init__(
+        self,
+        output_callback: Optional[Callable[[str], None]] = None,
+        provider: Optional[str] = None,
+    ):
         """
         Initialize the SSH connection manager.
         
@@ -42,7 +52,8 @@ class SSHConnectionManager:
         self.shell: Optional[paramiko.Channel] = None
         self.connected = False
         self.output_callback = output_callback
-        logger.info("SSHConnectionManager initialized")
+        self.provider = (provider or SSHConfig.get_connection_provider()).upper()
+        logger.info(f"SSHConnectionManager initialized (provider={self.provider})")
     
     def connect(self) -> None:
         """
@@ -58,6 +69,10 @@ class SSHConnectionManager:
             return
         
         try:
+            if self.provider == "GCP":
+                self._connect_gcp()
+                return
+
             self._emit_output("[INFO] Initializing SSH connection...\n")
             logger.info("Starting SSH connection sequence")
             
@@ -179,6 +194,53 @@ class SSHConnectionManager:
             logger.error(f"Unexpected error during connection: {e}", exc_info=True)
             self._cleanup()
             raise RuntimeError(f"Connection failed: {e}")
+
+    def _connect_gcp(self) -> None:
+        """
+        Validate GCP SSH access and mark the manager connected.
+        Commands are executed via gcloud ssh --command in execute_command().
+        """
+        gcp_cmd = SSHConfig.get_gcp_ssh_command()
+        if not gcp_cmd:
+            raise RuntimeError(
+                "GCP mode requires ARGO_GCP_SSH_COMMAND in env/secrets. "
+                "Set it and reconnect."
+            )
+        self._emit_output("[INFO] Initializing GCP SSH connection...\n")
+        self._emit_output("[INFO] Using GCP SSH command from env/secrets\n")
+        logger.info("Starting GCP connection validation")
+
+        try:
+            if "--command" in gcp_cmd:
+                raise RuntimeError(
+                    "ARGO_GCP_SSH_COMMAND must not include --command. "
+                    "Provide only the base gcloud ssh command."
+                )
+
+            probe_cmd = gcp_cmd
+            probe_cmd = f'{probe_cmd} --command "echo gcp-ssh-ready"'
+
+            result = subprocess.run(
+                probe_cmd,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=90,
+            )
+            if result.returncode != 0:
+                stderr = (result.stderr or "").strip()
+                stdout = (result.stdout or "").strip()
+                detail = stderr or stdout or "unknown gcloud error"
+                raise RuntimeError(f"GCP SSH validation failed: {detail}")
+
+            self.connected = True
+            self._emit_output("[OK] GCP connection validated\n")
+            self._emit_output("[SUCCESS] Connection established. Ready for kubectl commands.\n\n")
+            logger.info("GCP connection validated successfully")
+        except Exception as e:
+            logger.error(f"GCP connection validation failed: {e}", exc_info=True)
+            self._cleanup()
+            raise RuntimeError(f"Connection failed: {e}")
     
     def disconnect(self) -> None:
         """Cleanly close the SSH connection."""
@@ -210,6 +272,9 @@ class SSHConnectionManager:
         """
         if not self.connected:
             raise RuntimeError("Not connected. Call connect() first.")
+
+        if self.provider == "GCP":
+            return self._execute_gcp_command(command, timeout)
         
         # Drain any pending output from previous commands (CRITICAL for clean output)
         if self.shell and self.shell.recv_ready():
@@ -230,6 +295,24 @@ class SSHConnectionManager:
         logger.debug(f"Command output received ({len(output)} bytes)")
         
         return output
+
+    def _execute_gcp_command(self, command: str, timeout: float = 10.0) -> str:
+        """Execute one command through gcloud ssh --command."""
+        logger.info(f"Executing GCP command: {command}")
+        shell_cmd = self._build_gcp_shell_command(command)
+        result = subprocess.run(
+            shell_cmd,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=max(timeout, 10.0),
+        )
+        if result.returncode != 0:
+            stderr = (result.stderr or "").strip()
+            stdout = (result.stdout or "").strip()
+            detail = stderr or stdout or "unknown gcloud command error"
+            raise RuntimeError(f"GCP command failed: {detail}")
+        return result.stdout or ""
     
     def execute_streaming_command(
         self, 
@@ -250,6 +333,10 @@ class SSHConnectionManager:
         """
         if not self.connected:
             raise RuntimeError("Not connected. Call connect() first.")
+
+        if self.provider == "GCP":
+            self._execute_gcp_streaming_command(command, output_callback, stop_check)
+            return
         
         logger.info(f"Executing streaming command: {command}")
         self._send_command(command)
@@ -291,9 +378,58 @@ class SSHConnectionManager:
             except Exception as e:
                 logger.error(f"Error during streaming: {e}", exc_info=True)
                 break
+
+    def _execute_gcp_streaming_command(
+        self,
+        command: str,
+        output_callback: Callable[[str], None],
+        stop_check: Optional[Callable[[], bool]] = None,
+    ) -> None:
+        """Execute streaming command through gcloud ssh --command."""
+        logger.info(f"Executing GCP streaming command: {command}")
+        shell_cmd = self._build_gcp_shell_command(command)
+        proc = subprocess.Popen(
+            shell_cmd,
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+
+        try:
+            while True:
+                if stop_check and stop_check():
+                    logger.info("Stop requested for GCP streaming command")
+                    proc.terminate()
+                    break
+
+                if proc.stdout is None:
+                    break
+
+                line = proc.stdout.readline()
+                if not line:
+                    if proc.poll() is not None:
+                        break
+                    time.sleep(0.05)
+                    continue
+
+                output_callback(line)
+        finally:
+            if proc.poll() is None:
+                proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                proc.kill()
+
+        if proc.returncode not in (0, None):
+            raise RuntimeError(f"GCP streaming command failed with code {proc.returncode}")
     
     def is_connected(self) -> bool:
         """Check if the connection is active."""
+        if self.provider == "GCP":
+            return self.connected
         return self.connected and self.shell and not self.shell.closed
     
     # -------------------------
@@ -374,6 +510,26 @@ class SSHConnectionManager:
             except Exception as e:
                 logger.warning(f"Error closing client: {e}")
             self.client = None
+
+    def _build_gcp_shell_command(self, remote_command: str) -> str:
+        """
+        Build a full gcloud command that executes remote_command as the target
+        service account.
+        """
+        base_cmd = SSHConfig.get_gcp_ssh_command()
+        service_account = SSHConfig.get_gcp_service_account()
+
+        wrapped_remote = (
+            f"sudo su - {shlex.quote(service_account)} -c {shlex.quote(remote_command)}"
+        )
+
+        if "--command" in base_cmd:
+            raise RuntimeError(
+                "ARGO_GCP_SSH_COMMAND must not include --command. "
+                "Provide only the base gcloud ssh command."
+            )
+
+        return f"{base_cmd} --command {shlex.quote(wrapped_remote)}"
     
     def _emit_output(self, text: str) -> None:
         """

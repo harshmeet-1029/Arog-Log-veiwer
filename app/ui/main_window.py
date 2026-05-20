@@ -37,7 +37,7 @@ from PySide6.QtGui import (
 from app.ssh.argo_worker import ArgoWorker
 from app.ssh.connection_manager import SSHConnectionManager
 from app.logging_config import get_logger
-from app.config import SecurityConfig, AppConfig, UpdateConfig
+from app.config import SecurityConfig, AppConfig, UpdateConfig, SSHConfig
 from app.update_checker import UpdateChecker, UpdateInfo
 from app.themes import get_theme, get_available_theme_names, get_theme_name_from_display
 
@@ -602,6 +602,25 @@ class MainWindow(QWidget):
         layout.addStretch()
         
         # Theme selector (compact) - auto-populated from themes.py
+        provider_label = QLabel("Registry:")
+        provider_label.setStyleSheet("font-size: 9pt;")
+        layout.addWidget(provider_label)
+        self.provider_combo = QComboBox()
+        self.provider_combo.addItems(["GCP", "ECR"])
+        self.provider_combo.setMinimumWidth(90)
+        self.provider_combo.setMinimumHeight(25)
+        self.provider_combo.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+        self.provider_combo.setCurrentText(SSHConfig.get_connection_provider())
+        self.provider_combo.setToolTip(
+            "Choose backend connection mode:\n"
+            "• ECR: existing SSH flow (unchanged)\n"
+            "• GCP: uses ARGO_GCP_SSH_COMMAND from env/secrets\n\n"
+            "For GCP, login in terminal first (example: gcloud auth login).\n"
+            "If authentication fails, run the gcloud command manually once."
+        )
+        layout.addWidget(self.provider_combo)
+
+        # Theme selector (compact) - auto-populated from themes.py
         theme_label = QLabel("Theme:")
         theme_label.setStyleSheet("font-size: 9pt;")
         layout.addWidget(theme_label)
@@ -963,10 +982,12 @@ class MainWindow(QWidget):
         self.console_output.clear()
         self.console_output.append("=== Initiating SSH connection ===\n")
         
-        # Create SSH manager if not exists
-        if not self.ssh_manager:
-            logger.debug("Creating new SSH connection manager")
-            self.ssh_manager = SSHConnectionManager()
+        selected_provider = self.provider_combo.currentText().upper()
+
+        # Create/recreate SSH manager based on selected provider
+        if (not self.ssh_manager) or (getattr(self.ssh_manager, "provider", "ECR") != selected_provider):
+            logger.debug(f"Creating SSH connection manager (provider={selected_provider})")
+            self.ssh_manager = SSHConnectionManager(provider=selected_provider)
         
         # Create and start worker
         self.worker = ArgoWorker(action="connect", ssh_manager=self.ssh_manager)
@@ -2257,19 +2278,21 @@ class MainWindow(QWidget):
             
             
             class MetricsConnectionWorker(QThread):
-                def __init__(self, parent):
+                def __init__(self, parent, provider: str):
                     super().__init__(parent)
                     self.ssh_manager = None
                     self.error_msg = None
+                    self.provider = provider
                 
                 def run(self):
                     try:
-                        self.ssh_manager = SSHConnectionManager()
+                        self.ssh_manager = SSHConnectionManager(provider=self.provider)
                         self.ssh_manager.connect()
                     except Exception as e:
                         self.error_msg = str(e)
             
-            self.metrics_connection_worker = MetricsConnectionWorker(self)
+            selected_provider = self.provider_combo.currentText().upper()
+            self.metrics_connection_worker = MetricsConnectionWorker(self, selected_provider)
             
             def on_metrics_connection_complete():
                 if self.metrics_connection_worker.error_msg:

@@ -23,6 +23,9 @@ class SSHConfig:
     DEFAULT_JUMP_HOST = "usejump"
     DEFAULT_INTERNAL_HOST = "10.0.34.231"
     DEFAULT_SERVICE_ACCOUNT = "solutions01-prod-us-east-1-eks"
+    DEFAULT_CONNECTION_PROVIDER = "ECR"
+    DEFAULT_GCP_SSH_COMMAND = ""
+    DEFAULT_GCP_SERVICE_ACCOUNT = "solutions01-unbxd-us-est4-gke"
     
     @staticmethod
     def get_jump_host() -> str:
@@ -64,6 +67,45 @@ class SSHConfig:
         """
         account = os.getenv("ARGO_SERVICE_ACCOUNT", SSHConfig.DEFAULT_SERVICE_ACCOUNT)
         logger.debug(f"Using service account: {account}")
+        return account
+
+    @staticmethod
+    def get_connection_provider() -> str:
+        """
+        Get connection provider.
+
+        Environment variable: ARGO_CONNECTION_PROVIDER
+        Values: ECR or GCP
+        """
+        provider = os.getenv("ARGO_CONNECTION_PROVIDER", SSHConfig.DEFAULT_CONNECTION_PROVIDER).upper()
+        if provider not in ("ECR", "GCP"):
+            logger.warning(f"Invalid ARGO_CONNECTION_PROVIDER='{provider}', falling back to ECR")
+            provider = "ECR"
+        return provider
+
+    @staticmethod
+    def get_gcp_ssh_command() -> str:
+        """
+        Get base gcloud SSH command used for GCP provider.
+
+        Environment variable: ARGO_GCP_SSH_COMMAND
+        """
+        cmd = os.getenv("ARGO_GCP_SSH_COMMAND", SSHConfig.DEFAULT_GCP_SSH_COMMAND).strip()
+        if not cmd:
+            logger.warning("ARGO_GCP_SSH_COMMAND is not set")
+        else:
+            logger.debug("Using GCP SSH command from environment")
+        return cmd
+
+    @staticmethod
+    def get_gcp_service_account() -> str:
+        """
+        Get GCP sudo target account.
+
+        Environment variable: ARGO_GCP_SERVICE_ACCOUNT
+        """
+        account = os.getenv("ARGO_GCP_SERVICE_ACCOUNT", SSHConfig.DEFAULT_GCP_SERVICE_ACCOUNT).strip()
+        logger.debug(f"Using GCP service account: {account}")
         return account
     
     @staticmethod
