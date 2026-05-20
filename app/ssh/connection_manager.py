@@ -202,12 +202,9 @@ class SSHConnectionManager:
         """
         gcp_cmd = SSHConfig.get_gcp_ssh_command()
         if not gcp_cmd:
-            raise RuntimeError(
-                "GCP mode requires ARGO_GCP_SSH_COMMAND in env/secrets. "
-                "Set it and reconnect."
-            )
+            raise RuntimeError("GCP_USERNAME_NOT_SET")
         self._emit_output("[INFO] Initializing GCP SSH connection...\n")
-        self._emit_output("[INFO] Using GCP SSH command from env/secrets\n")
+        self._emit_output(f"[INFO] Connecting as: {gcp_cmd.split('@')[0].split()[-1]}\n")
         logger.info("Starting GCP connection validation")
 
         try:
@@ -217,8 +214,7 @@ class SSHConnectionManager:
                     "Provide only the base gcloud ssh command."
                 )
 
-            probe_cmd = gcp_cmd
-            probe_cmd = f'{probe_cmd} --command "echo gcp-ssh-ready"'
+            probe_cmd = f'{gcp_cmd} --command "echo gcp-ssh-ready"'
 
             result = subprocess.run(
                 probe_cmd,
@@ -226,6 +222,7 @@ class SSHConnectionManager:
                 capture_output=True,
                 text=True,
                 timeout=90,
+                env={**os.environ, "GCLOUD_SSH_COMMAND": "ssh"},
             )
             if result.returncode != 0:
                 stderr = (result.stderr or "").strip()
@@ -256,7 +253,7 @@ class SSHConnectionManager:
         logger.info("✓ Disconnected successfully")
         self._emit_output("[OK] Disconnected\n")
     
-    def execute_command(self, command: str, timeout: float = 5.0) -> str:
+    def execute_command(self, command: str, timeout: float = 60.0) -> str:
         """
         Execute a command in the established SSH context.
         
@@ -296,7 +293,7 @@ class SSHConnectionManager:
         
         return output
 
-    def _execute_gcp_command(self, command: str, timeout: float = 10.0) -> str:
+    def _execute_gcp_command(self, command: str, timeout: float = 60.0) -> str:
         """Execute one command through gcloud ssh --command."""
         logger.info(f"Executing GCP command: {command}")
         shell_cmd = self._build_gcp_shell_command(command)
@@ -305,7 +302,8 @@ class SSHConnectionManager:
             shell=True,
             capture_output=True,
             text=True,
-            timeout=max(timeout, 10.0),
+            timeout=max(timeout, 60.0),
+            env={**os.environ, "GCLOUD_SSH_COMMAND": "ssh"},
         )
         if result.returncode != 0:
             stderr = (result.stderr or "").strip()
@@ -395,6 +393,7 @@ class SSHConnectionManager:
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
+            env={**os.environ, "GCLOUD_SSH_COMMAND": "ssh"},
         )
 
         try:
@@ -514,14 +513,11 @@ class SSHConnectionManager:
     def _build_gcp_shell_command(self, remote_command: str) -> str:
         """
         Build a full gcloud command that executes remote_command as the target
-        service account.
+        service account. SSH connects as the OS Login user, then sudo su switches
+        to the service account that has kubectl access.
         """
         base_cmd = SSHConfig.get_gcp_ssh_command()
         service_account = SSHConfig.get_gcp_service_account()
-
-        wrapped_remote = (
-            f"sudo su - {shlex.quote(service_account)} -c {shlex.quote(remote_command)}"
-        )
 
         if "--command" in base_cmd:
             raise RuntimeError(
@@ -529,7 +525,8 @@ class SSHConnectionManager:
                 "Provide only the base gcloud ssh command."
             )
 
-        return f"{base_cmd} --command {shlex.quote(wrapped_remote)}"
+        wrapped_remote = f"sudo -i -u {service_account} {remote_command}"
+        return f'{base_cmd} --command "{wrapped_remote}"'
     
     def _emit_output(self, text: str) -> None:
         """

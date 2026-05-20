@@ -17,10 +17,7 @@ permissions:
   contents: write  # Required to create releases and upload assets
 
 env:
-  # Connection provider config (runtime; baked app reads from env in CI tests/build runs)
   ARGO_CONNECTION_PROVIDER: ${{ secrets.ARGO_CONNECTION_PROVIDER }}
-  ARGO_GCP_SSH_COMMAND: ${{ secrets.ARGO_GCP_SSH_COMMAND }}
-  ARGO_GCP_SERVICE_ACCOUNT: ${{ secrets.ARGO_GCP_SERVICE_ACCOUNT }}
 
 jobs:
   build-windows:
@@ -524,13 +521,13 @@ jobs:
         
         chmod +x ${DEBDIR}/DEBIAN/postinst
         
-        # Create prerm script — kill any running instance before uninstall
+        # Create prerm script - kill any running instance before uninstall
         cat > ${DEBDIR}/DEBIAN/prerm << 'EOF'
         #!/bin/bash
         set -e
         
         # Kill running instances before removing.
-        # Use -x (exact name match) NOT -f (full cmdline match) — otherwise pkill
+        # Use -x (exact name match) NOT -f (full cmdline match) - otherwise pkill
         # would also kill the apt/dpkg process running this script.
         pkill -x argologviewer || true
         sleep 1
@@ -847,7 +844,7 @@ jobs:
              sudo mv ArgoLogViewer-v${{ github.event.inputs.version }}-Linux-Portable /usr/local/bin/argologviewer
              ```
           
-          > **Important for Portable users:** Double-clicking the file in the file manager will show **"Could not Display - There is no app installed for Executable files"** — this is normal Linux security behavior. You **must** run it from a terminal using the commands above. Alternatively: right-click the file → **Properties** → **Permissions** → check **"Allow executing as program"**, then double-click it.
+          > **Important for Portable users:** Double-clicking the file in the file manager will show **"Could not Display - There is no app installed for Executable files"** - this is normal Linux security behavior. You **must** run it from a terminal using the commands above. Alternatively: right-click the file → **Properties** → **Permissions** → check **"Allow executing as program"**, then double-click it.
           
           ---
           ### ✅ Compatibility

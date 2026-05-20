@@ -93,7 +93,7 @@ class KubernetesOperations:
         logger.debug(f"Executing: {command}")
         
         try:
-            output = self.ssh.execute_command(command, timeout=10.0)
+            output = self.ssh.execute_command(command, timeout=60.0)
             # Strip ANSI color codes
             clean_output = self._strip_ansi_codes(output)
             logger.debug(f"Received output: {len(clean_output)} bytes")
@@ -135,7 +135,7 @@ class KubernetesOperations:
         logger.debug(f"Executing: {command}")
         
         try:
-            output = self.ssh.execute_command(command, timeout=10.0)
+            output = self.ssh.execute_command(command, timeout=60.0)
             # Strip ANSI color codes from output
             clean_output = self._strip_ansi_codes(output)
             logger.debug(f"Received output: {len(clean_output)} bytes")
@@ -241,7 +241,7 @@ class KubernetesOperations:
         logger.debug(f"Executing: {command}")
         
         try:
-            output = self.ssh.execute_command(command, timeout=10.0)
+            output = self.ssh.execute_command(command, timeout=60.0)
             logger.info(f"Retrieved pod details ({len(output)} bytes)")
             return output
         
@@ -282,7 +282,7 @@ class KubernetesOperations:
         logger.debug(f"Executing: {command}")
         
         try:
-            output = self.ssh.execute_command(command, timeout=8.0)
+            output = self.ssh.execute_command(command, timeout=60.0)
             # Strip ANSI color codes
             clean_output = self._strip_ansi_codes(output).strip()
             

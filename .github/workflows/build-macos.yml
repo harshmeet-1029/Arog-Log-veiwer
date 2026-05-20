@@ -17,10 +17,7 @@ permissions:
   contents: write  # Required to create releases and upload assets
 
 env:
-  # Connection provider config (runtime; baked app reads from env in CI tests/build runs)
   ARGO_CONNECTION_PROVIDER: ${{ secrets.ARGO_CONNECTION_PROVIDER }}
-  ARGO_GCP_SSH_COMMAND: ${{ secrets.ARGO_GCP_SSH_COMMAND }}
-  ARGO_GCP_SERVICE_ACCOUNT: ${{ secrets.ARGO_GCP_SERVICE_ACCOUNT }}
 
 jobs:
   build-macos-arm:

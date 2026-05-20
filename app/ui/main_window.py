@@ -110,7 +110,7 @@ class _DiskWriter(_threading.Thread):
                     self._file.write(item)
         except Exception:
             self._failed = True
-            logger.error("DiskWriter thread crashed — disk writes will be disabled", exc_info=True)
+            logger.error("DiskWriter thread crashed - disk writes will be disabled", exc_info=True)
             # Drain the queue and unblock any pending flush_and_wait callers
             try:
                 while True:
@@ -129,6 +129,318 @@ class _DiskWriter(_threading.Thread):
 
 # NOTE: Theme styling is now managed in app/themes.py
 # This makes it easy to add new themes without editing this file!
+
+
+# ── GCP Settings Dialog ──────────────────────────────────────────────────────
+
+class GCPSettingsDialog(QDialog):
+    """
+    Dialog for users to enter their own GCP connection details.
+    Saved to app_config.json - no .env editing required.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("GCP Connection Settings")
+        self.setMinimumWidth(520)
+        self.setModal(True)
+        self._build_ui()
+
+    def _build_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        title = QLabel("GCP Connection Settings")
+        title.setStyleSheet("font-size: 14pt; font-weight: bold;")
+        layout.addWidget(title)
+
+        info = QLabel(
+            "Enter your GCP OS Login username below.\n"
+            "This is saved only on your machine - never shared."
+        )
+        info.setWordWrap(True)
+        info.setStyleSheet("color: gray; font-size: 9pt;")
+        layout.addWidget(info)
+
+        form_group = QGroupBox("Your GCP Identity")
+        form = QVBoxLayout(form_group)
+        form.setSpacing(8)
+
+        form.addWidget(QLabel("OS Login Username:"))
+        self.username_input = QLineEdit()
+        self.username_input.setPlaceholderText("e.g.  firstname_lastname_company_com")
+        self.username_input.setText(AppConfig.get_gcp_os_login_username())
+        form.addWidget(self.username_input)
+
+        hint = QLabel(
+            "Not sure what yours is? Run this in a terminal:\n"
+            "   gcloud compute os-login describe-profile\n"
+            "Look for 'username' under posixAccounts."
+        )
+        hint.setStyleSheet("color: gray; font-size: 8pt;")
+        form.addWidget(hint)
+
+        layout.addWidget(form_group)
+
+
+        self.status_label = QLabel("")
+        self.status_label.setWordWrap(True)
+        layout.addWidget(self.status_label)
+
+        btn_box = QHBoxLayout()
+        save_btn = QPushButton("Save")
+        save_btn.setStyleSheet("font-weight: bold;")
+        save_btn.clicked.connect(self._save)
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        btn_box.addStretch()
+        btn_box.addWidget(cancel_btn)
+        btn_box.addWidget(save_btn)
+        layout.addLayout(btn_box)
+
+    def _save(self):
+        username = self.username_input.text().strip()
+        if not username:
+            self.status_label.setText("Username is required.")
+            self.status_label.setStyleSheet("color: red;")
+            return
+        AppConfig.set_gcp_os_login_username(username)
+        self.accept()
+
+
+# ── GCP Setup Wizard ─────────────────────────────────────────────────────────
+
+class GCPSetupWizard(QDialog):
+    """
+    First-run wizard shown when GCP provider is selected for the first time.
+    Walks users through: gcloud auth, SSH key generation, IAP tunnel test.
+    """
+
+    def __init__(self, gcp_cmd: str, parent=None):
+        super().__init__(parent)
+        self.gcp_cmd = gcp_cmd
+        self.setWindowTitle("GCP Setup - First Time Configuration")
+        self.setMinimumWidth(620)
+        self.setModal(True)
+        self._build_ui()
+
+    def _build_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(14)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        title = QLabel("GCP SSH Setup")
+        title.setStyleSheet("font-size: 16pt; font-weight: bold;")
+        layout.addWidget(title)
+
+        intro = QLabel(
+            "Before connecting, your machine needs to be set up for GCP SSH access.\n"
+            "Complete the steps below. Each step opens a terminal - follow the prompts."
+        )
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+
+        # Step 1
+        self.step1_label = QLabel("Step 1 - Enter Your GCP Details")
+        self.step1_label.setStyleSheet("font-weight: bold; font-size: 11pt;")
+        layout.addWidget(self.step1_label)
+        step1_desc = QLabel(
+            "Enter your OS Login username and other GCP details.\n"
+            "Each person uses their own - this is saved only on your machine."
+        )
+        step1_desc.setWordWrap(True)
+        layout.addWidget(step1_desc)
+        self.btn_settings = QPushButton("Open GCP Settings")
+        self.btn_settings.clicked.connect(self._open_gcp_settings)
+        layout.addWidget(self.btn_settings)
+
+        # Step 1b
+        step1b_label = QLabel("Step 1b - Authenticate with Google Cloud")
+        step1b_label.setStyleSheet("font-weight: bold; font-size: 11pt;")
+        layout.addWidget(step1b_label)
+        step1b_desc = QLabel(
+            "Opens a browser window. Sign in with your work account "
+            "(e.g. yourname@yourcompany.com)."
+        )
+        step1b_desc.setWordWrap(True)
+        layout.addWidget(step1b_desc)
+        self.btn_auth = QPushButton("Run: gcloud auth login")
+        self.btn_auth.clicked.connect(self._run_auth)
+        layout.addWidget(self.btn_auth)
+
+        # Step 2
+        self.step2_label = QLabel("Step 2 - Generate SSH Keys for GCP")
+        self.step2_label.setStyleSheet("font-weight: bold; font-size: 11pt;")
+        layout.addWidget(self.step2_label)
+        step2_desc = QLabel(
+            "Deletes any stale GCP SSH keys and pushes fresh ones to the VM.\n"
+            "When asked for a passphrase - press Enter (leave it empty)."
+        )
+        step2_desc.setWordWrap(True)
+        layout.addWidget(step2_desc)
+        self.btn_keygen = QPushButton("Regenerate GCP SSH Keys")
+        self.btn_keygen.clicked.connect(self._run_keygen)
+        layout.addWidget(self.btn_keygen)
+
+        # Step 3
+        self.step3_label = QLabel("Step 3 - Test the Connection")
+        self.step3_label.setStyleSheet("font-weight: bold; font-size: 11pt;")
+        layout.addWidget(self.step3_label)
+        step3_desc = QLabel(
+            "Runs a quick SSH probe to confirm everything is working.\n"
+            "You should see 'gcp-ssh-ready' printed in the terminal."
+        )
+        step3_desc.setWordWrap(True)
+        layout.addWidget(step3_desc)
+        self.btn_test = QPushButton("Test GCP SSH Connection")
+        self.btn_test.clicked.connect(self._run_test)
+        layout.addWidget(self.btn_test)
+
+        # Status
+        self.status_label = QLabel("")
+        self.status_label.setWordWrap(True)
+        layout.addWidget(self.status_label)
+
+        # Buttons
+        btn_box = QHBoxLayout()
+        self.done_btn = QPushButton("Done - Connect Now")
+        self.done_btn.setStyleSheet("font-weight: bold;")
+        self.done_btn.clicked.connect(self.accept)
+        cancel_btn = QPushButton("Skip for Now")
+        cancel_btn.clicked.connect(self.reject)
+        btn_box.addStretch()
+        btn_box.addWidget(cancel_btn)
+        btn_box.addWidget(self.done_btn)
+        layout.addLayout(btn_box)
+
+    def _open_terminal(self, cmd: str) -> None:
+        """Open a new PowerShell window running cmd."""
+        try:
+            subprocess.Popen(
+                ["powershell.exe", "-NoExit", "-Command", cmd],
+                creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0,
+            )
+            self._set_status(f"Opened terminal. Follow the prompts, then return here.", ok=True)
+        except Exception as e:
+            self._set_status(f"Could not open terminal: {e}", ok=False)
+
+    def _open_gcp_settings(self):
+        dlg = GCPSettingsDialog(parent=self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self._set_status("GCP settings saved.", ok=True)
+            # Refresh the gcp_cmd used for keygen/test steps
+            self.gcp_cmd = SSHConfig.get_gcp_ssh_command()
+
+    def _run_auth(self):
+        self._open_terminal("gcloud auth login")
+
+    def _run_keygen(self):
+        ssh_dir = os.path.expanduser("~/.ssh")
+        cmds = (
+            f"Remove-Item -Force '{ssh_dir}\\google_compute_engine' -ErrorAction SilentlyContinue; "
+            f"Remove-Item -Force '{ssh_dir}\\google_compute_engine.pub' -ErrorAction SilentlyContinue; "
+            f"Remove-Item -Force '{ssh_dir}\\google_compute_engine.ppk' -ErrorAction SilentlyContinue; "
+            f"{self.gcp_cmd} --command 'echo keys-pushed'"
+        )
+        self._open_terminal(cmds)
+
+    def _run_test(self):
+        test_cmd = f'{self.gcp_cmd} --command "echo gcp-ssh-ready"'
+        self._open_terminal(test_cmd)
+
+    def _set_status(self, msg: str, ok: bool):
+        color = "green" if ok else "red"
+        self.status_label.setText(msg)
+        self.status_label.setStyleSheet(f"color: {color};")
+
+
+# ── GCP SSH Fix Dialog ────────────────────────────────────────────────────────
+
+class GCPSSHFixDialog(QDialog):
+    """
+    Shown when a GCP SSH connection fails due to key rejection.
+    Lets the user fix auth / regenerate keys without leaving the app.
+    """
+
+    def __init__(self, gcp_cmd: str, error_detail: str, parent=None):
+        super().__init__(parent)
+        self.gcp_cmd = gcp_cmd
+        self.setWindowTitle("GCP SSH - Connection Fix")
+        self.setMinimumWidth(580)
+        self.setModal(True)
+        self._build_ui(error_detail)
+
+    def _build_ui(self, error_detail: str):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        title = QLabel("GCP SSH Authentication Failed")
+        title.setStyleSheet("font-size: 14pt; font-weight: bold; color: #e05252;")
+        layout.addWidget(title)
+
+        err_box = QPlainTextEdit(error_detail)
+        err_box.setReadOnly(True)
+        err_box.setMaximumHeight(90)
+        err_box.setStyleSheet("font-size: 9pt; background: #1e1e1e; color: #f88;")
+        layout.addWidget(err_box)
+
+        cause_label = QLabel(
+            "Most likely cause: GCP SSH keys are stale or missing.\n"
+            "Click a fix below - each opens a terminal to run the repair command."
+        )
+        cause_label.setWordWrap(True)
+        layout.addWidget(cause_label)
+
+        fix1_btn = QPushButton("Fix 1 - Re-authenticate gcloud  (gcloud auth login)")
+        fix1_btn.clicked.connect(lambda: self._open_terminal("gcloud auth login"))
+        layout.addWidget(fix1_btn)
+
+        ssh_dir = os.path.expanduser("~/.ssh")
+        keygen_cmd = (
+            f"Remove-Item -Force '{ssh_dir}\\google_compute_engine' -ErrorAction SilentlyContinue; "
+            f"Remove-Item -Force '{ssh_dir}\\google_compute_engine.pub' -ErrorAction SilentlyContinue; "
+            f"Remove-Item -Force '{ssh_dir}\\google_compute_engine.ppk' -ErrorAction SilentlyContinue; "
+            f"{self.gcp_cmd} --command 'echo keys-pushed'"
+        )
+        fix2_btn = QPushButton("Fix 2 - Regenerate GCP SSH keys  (recommended)")
+        fix2_btn.setStyleSheet("font-weight: bold;")
+        fix2_btn.clicked.connect(lambda: self._open_terminal(keygen_cmd))
+        layout.addWidget(fix2_btn)
+
+        test_btn = QPushButton("Test - Verify connection works now")
+        test_btn.clicked.connect(
+            lambda: self._open_terminal(f'{self.gcp_cmd} --command "echo gcp-ssh-ready"')
+        )
+        layout.addWidget(test_btn)
+
+        self.status_label = QLabel("")
+        self.status_label.setWordWrap(True)
+        layout.addWidget(self.status_label)
+
+        btn_box = QHBoxLayout()
+        retry_btn = QPushButton("Retry Connection")
+        retry_btn.setStyleSheet("font-weight: bold;")
+        retry_btn.clicked.connect(self.accept)
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.reject)
+        btn_box.addStretch()
+        btn_box.addWidget(close_btn)
+        btn_box.addWidget(retry_btn)
+        layout.addLayout(btn_box)
+
+    def _open_terminal(self, cmd: str):
+        try:
+            subprocess.Popen(
+                ["powershell.exe", "-NoExit", "-Command", cmd],
+                creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0,
+            )
+            self.status_label.setText("Terminal opened. Follow the steps, then click Retry Connection.")
+            self.status_label.setStyleSheet("color: green;")
+        except Exception as e:
+            self.status_label.setText(f"Could not open terminal: {e}")
+            self.status_label.setStyleSheet("color: red;")
 
 
 class MainWindow(QWidget):
@@ -351,7 +663,7 @@ class MainWindow(QWidget):
 
         Returns a list of (start, end) character-position tuples.
         Supports plain text (case-insensitive) and regular expressions.
-        Uses O(1) blockCount cache key — never calls toPlainText().
+        Uses O(1) blockCount cache key - never calls toPlainText().
         """
         if not search_text:
             return []
@@ -373,7 +685,7 @@ class MainWindow(QWidget):
                     QRegularExpression.PatternOption.CaseInsensitiveOption
                 )
                 if not regex.isValid():
-                    logger.warning(f"Invalid regex '{search_text}' — falling back to plain search")
+                    logger.warning(f"Invalid regex '{search_text}' - falling back to plain search")
                     use_regex = False
 
             if use_regex:
@@ -508,6 +820,11 @@ class MainWindow(QWidget):
         # Settings menu
         settings_menu = menu_bar.addMenu("Settings")
         
+        gcp_settings_action = QAction("GCP Connection Settings...", self)
+        gcp_settings_action.setStatusTip("Configure your GCP username, VM, and zone")
+        gcp_settings_action.triggered.connect(self._show_gcp_settings_dialog)
+        settings_menu.addAction(gcp_settings_action)
+
         ssh_config_settings_action = QAction("Custom SSH Folder...", self)
         ssh_config_settings_action.setStatusTip("Configure custom SSH folder location")
         ssh_config_settings_action.triggered.connect(self._show_ssh_folder_config_dialog)
@@ -878,7 +1195,7 @@ class MainWindow(QWidget):
         self.load_older_bar.setVisible(False)
         log_container_layout.addWidget(self.load_older_bar)
         
-        # Log output — QPlainTextEdit is much faster than QTextEdit for plain text
+        # Log output - QPlainTextEdit is much faster than QTextEdit for plain text
         self.log_output = QPlainTextEdit()
         self.log_output.setReadOnly(True)
         wrap_mode = (QPlainTextEdit.LineWrapMode.WidgetWidth
@@ -978,27 +1295,44 @@ class MainWindow(QWidget):
     def handle_connect(self):
         """Handle connect button click."""
         logger.info("Connect button clicked")
-        
+
+        selected_provider = self.provider_combo.currentText().upper()
+
+        # GCP: if username not set, ask for it now before doing anything else
+        if selected_provider == "GCP" and not AppConfig.get_gcp_os_login_username():
+            dlg = GCPSettingsDialog(parent=self)
+            dlg.setWindowTitle("GCP Setup - Enter Your Username First")
+            if dlg.exec() != QDialog.DialogCode.Accepted:
+                return
+
+        # First-run GCP setup wizard
+        if selected_provider == "GCP" and not AppConfig.is_gcp_setup_complete():
+            gcp_cmd = SSHConfig.get_gcp_ssh_command()
+            if gcp_cmd:
+                wizard = GCPSetupWizard(gcp_cmd, parent=self)
+                result = wizard.exec()
+                AppConfig.mark_gcp_setup_complete()
+                if result != QDialog.DialogCode.Accepted:
+                    return
+
         self.console_output.clear()
         self.console_output.append("=== Initiating SSH connection ===\n")
-        
-        selected_provider = self.provider_combo.currentText().upper()
 
         # Create/recreate SSH manager based on selected provider
         if (not self.ssh_manager) or (getattr(self.ssh_manager, "provider", "ECR") != selected_provider):
             logger.debug(f"Creating SSH connection manager (provider={selected_provider})")
             self.ssh_manager = SSHConnectionManager(provider=selected_provider)
-        
+
         # Create and start worker
         self.worker = ArgoWorker(action="connect", ssh_manager=self.ssh_manager)
         self.worker.output.connect(self._append_console)
         self.worker.connected.connect(self._on_connected)
-        self.worker.pods.connect(self._on_pods_received)  # ← CONNECT PODS SIGNAL!
+        self.worker.pods.connect(self._on_pods_received)
         self.worker.error.connect(self._on_error)
-        
+
         self.connect_btn.setEnabled(False)
         self.connect_btn.setText("Connecting...")
-        
+
         logger.info("Starting connection worker")
         self.worker.start()
     
@@ -1067,13 +1401,15 @@ class MainWindow(QWidget):
                 self.worker.wait()
         
         self.pod_list.clear()
+        self.pod_list.addItem("⏳ Loading pods via GCP tunnel, please wait...")
         self.console_output.append("\n=== Refreshing pod list ===\n")
-        
+        self.console_output.append("[INFO] Connecting through IAP tunnel — this may take 15-30 seconds...\n")
+
         # Disable buttons mutually
         self.refresh_btn.setEnabled(False)
         self.refresh_btn.setText("Refreshing...")
         self.fetch_btn.setEnabled(False)
-        
+
         # Create worker to list all pods (similar to connect action)
         self.worker = ArgoWorker(action="list_all_pods", ssh_manager=self.ssh_manager)
         self.worker.output.connect(self._append_console)
@@ -1126,13 +1462,15 @@ class MainWindow(QWidget):
         
         logger.info(f"Fetching pods with keyword: '{keyword}'")
         self.pod_list.clear()
+        self.pod_list.addItem("⏳ Searching via GCP tunnel, please wait...")
         self.console_output.append(f"\n=== Fetching pods matching '{keyword}' ===\n")
-        
+        self.console_output.append("[INFO] Connecting through IAP tunnel — this may take 15-30 seconds...\n")
+
         # Disable buttons mutually
         self.fetch_btn.setEnabled(False)
-        self.fetch_btn.setText("Fetching...")
+        self.fetch_btn.setText("Searching...")
         self.refresh_btn.setEnabled(False)
-        
+
         # Create and start worker
         self.worker = ArgoWorker(
             action="list_pods",
@@ -1142,7 +1480,7 @@ class MainWindow(QWidget):
         self.worker.output.connect(self._append_console)
         self.worker.pods.connect(self._on_pods_received)
         self.worker.error.connect(self._on_error)
-        
+
         logger.info("Starting list_pods worker")
         self.worker.start()
     
@@ -1167,7 +1505,7 @@ class MainWindow(QWidget):
         self._ui_start_line = 0
         self._ui_end_line = 0
         self._ui_lines_count = 0
-        self._doc_revision = 0  # New pod session — old search cache positions are invalid
+        self._doc_revision = 0  # New pod session - old search cache positions are invalid
         self.load_older_bar.setVisible(False)  # Hide load older bar initially
 
         self.log_output.clear()
@@ -1233,7 +1571,7 @@ class MainWindow(QWidget):
             logger.debug("Stopping batch timer")
             self._batch_timer.stop()
 
-        # Flush any remaining batched lines to disk BEFORE clearing — ensures the
+        # Flush any remaining batched lines to disk BEFORE clearing - ensures the
         # last few lines captured in the 50 ms window are not permanently lost.
         if self._log_append_batch and self._disk_buffering_enabled and self._disk_writer:
             logger.debug(f"Final flush of {len(self._log_append_batch)} pending batches before stop")
@@ -1272,7 +1610,7 @@ class MainWindow(QWidget):
         # Freeze last metrics reading before stopping (so user sees final values)
         if self._last_metrics_cpu:
             frozen_text = f"│ CPU: {self._last_metrics_cpu} • Memory: {self._last_metrics_memory}  (stopped)"
-            frozen_tip = "Final reading — metrics stopped when log stream ended"
+            frozen_tip = "Final reading - metrics stopped when log stream ended"
             self.metrics_label.setText(frozen_text)
             self.metrics_label.setToolTip(frozen_tip)
             self.metrics_label.setVisible(True)
@@ -1603,7 +1941,7 @@ class MainWindow(QWidget):
     
     def _search_ui_logs(self, search_text: str):
         """Search only currently visible logs in UI (fast)."""
-        self._disk_search_total = 0  # No disk search — clear the disk total
+        self._disk_search_total = 0  # No disk search - clear the disk total
         self.current_search_term = search_text
         
         # Find all occurrences in UI
@@ -1836,7 +2174,7 @@ class MainWindow(QWidget):
                 if not flushed:
                     reply = QMessageBox.question(
                         self._get_active_window(),
-                        "Flush Timeout — Save Anyway?",
+                        "Flush Timeout - Save Anyway?",
                         "The disk writer did not finish flushing within 30 seconds.\n\n"
                         "The saved file may be missing the most recent log lines.\n\n"
                         "Save anyway?",
@@ -1972,7 +2310,7 @@ class MainWindow(QWidget):
         if self._ui_start_line > 0:
             QMessageBox.information(
                 self._get_active_window(),
-                "Incomplete Copy — Use Save Logs",
+                "Incomplete Copy - Use Save Logs",
                 f"{self._ui_start_line:,} older lines are stored on disk and are NOT visible in the UI.\n\n"
                 "Copying now would give you an incomplete log.\n\n"
                 "Use  Save Logs  to get the complete history as a text file."
@@ -1984,7 +2322,7 @@ class MainWindow(QWidget):
             missing_bottom = self._disk_log_lines_count - self._ui_end_line
             QMessageBox.information(
                 self._get_active_window(),
-                "Incomplete Copy — Use Save Logs",
+                "Incomplete Copy - Use Save Logs",
                 f"{missing_bottom:,} recent lines were pushed off the bottom when older lines were loaded "
                 "and are NOT visible in the UI.\n\n"
                 "Copying now would give you an incomplete log.\n\n"
@@ -1992,11 +2330,11 @@ class MainWindow(QWidget):
             )
             return
 
-        # Guard 2: document too large for clipboard — would crash or hang
+        # Guard 2: document too large for clipboard - would crash or hang
         if block_count > 50000:
             QMessageBox.information(
                 self._get_active_window(),
-                "Too Large for Clipboard — Use Save Logs",
+                "Too Large for Clipboard - Use Save Logs",
                 f"The log has {block_count:,} lines. Copying that much to the clipboard "
                 "can freeze or crash the app.\n\n"
                 "Use  Save Logs  to write it to a file instead."
@@ -2357,61 +2695,89 @@ class MainWindow(QWidget):
         """Handle received pod list with crash protection."""
         try:
             logger.info(f"Received {len(pods)} pods")
+            self.pod_list.clear()
             self.pod_list.addItems(pods)
             self.fetch_btn.setEnabled(True)
             self.fetch_btn.setText("Search Pods")
             self.refresh_btn.setEnabled(True)
             self.refresh_btn.setText("↺ Refresh All Pods")
-            
+
             if not pods:
                 QMessageBox.information(self, "No Results", "No pods found matching the search keyword")
         except Exception as e:
             logger.error(f"Error in _on_pods_received: {e}", exc_info=True)
     
+    def _is_gcp_key_error(self, error_msg: str) -> bool:
+        """Return True if the error is a GCP SSH key/auth rejection."""
+        indicators = [
+            "server refused our key",
+            "no supported authentication methods",
+            "publickey",
+            "permission denied (publickey",
+            "gcp ssh validation failed",
+        ]
+        lower = error_msg.lower()
+        return any(ind in lower for ind in indicators)
+
     def _on_error(self, error_msg):
         """Handle error from worker with crash protection and optional auto-reconnect."""
         try:
             logger.error(f"Worker error: {error_msg}")
-            
+
             # Reset refreshing state if applicable
             self.refresh_btn.setEnabled(self.is_connected)
             self.refresh_btn.setText("↺ Refresh All Pods")
-            
+
+            selected_provider = self.provider_combo.currentText().upper()
+
             # Check if this is an SSH connection error
-            is_ssh_error = any(keyword in error_msg.lower() for keyword in 
-                              ['connection', 'ssh', 'timeout', 'broken pipe', 'lost connection'])
-            
-            if "getaddrinfo failed" in error_msg:
-                QMessageBox.critical(self, "Connection Error", 
+            is_ssh_error = any(keyword in error_msg.lower() for keyword in
+                               ['connection', 'ssh', 'timeout', 'broken pipe', 'lost connection'])
+
+            if "GCP_USERNAME_NOT_SET" in error_msg:
+                dlg = GCPSettingsDialog(parent=self)
+                dlg.setWindowTitle("GCP Setup - Enter Your Username")
+                if dlg.exec() == QDialog.DialogCode.Accepted:
+                    QTimer.singleShot(300, self.handle_connect)
+                    return
+
+            elif "getaddrinfo failed" in error_msg:
+                QMessageBox.critical(self, "Connection Error",
                     "Failed to resolve server address (DNS Error).\n\n"
                     "Possible causes:\n"
                     "1. VPN is disconnected\n"
                     "2. Internet connection issue\n"
                     "3. Invalid hostname in config\n\n"
                     "Please check your connection and try again.")
+
+            elif selected_provider == "GCP" and self._is_gcp_key_error(error_msg):
+                # GCP SSH key rejected - show the fix dialog
+                gcp_cmd = SSHConfig.get_gcp_ssh_command()
+                fix_dialog = GCPSSHFixDialog(gcp_cmd, error_msg, parent=self)
+                result = fix_dialog.exec()
+                if result == QDialog.DialogCode.Accepted:
+                    # User clicked "Retry Connection" - kick off connect again
+                    QTimer.singleShot(300, self.handle_connect)
+                    return  # Skip re-enabling buttons; handle_connect will do it
+
             elif is_ssh_error and self.auto_reconnect_enabled and self.reconnect_attempts < self.max_reconnect_attempts:
                 # Attempt auto-reconnect
                 self.reconnect_attempts += 1
                 logger.info(f"Auto-reconnect attempt {self.reconnect_attempts}/{self.max_reconnect_attempts}")
-                
-                # Show notification instead of error dialog
+
                 self.console_output.append(f"\n[!] Connection lost. Auto-reconnecting ({self.reconnect_attempts}/{self.max_reconnect_attempts})...\n")
-                
-                # Schedule reconnect after 3 seconds
+
                 if self.reconnect_timer:
                     self.reconnect_timer.stop()
-                
+
                 self.reconnect_timer = QTimer(self)
                 self.reconnect_timer.setSingleShot(True)
                 self.reconnect_timer.timeout.connect(self._attempt_reconnect)
-                self.reconnect_timer.start(3000)  # 3 seconds delay
+                self.reconnect_timer.start(3000)
             else:
-                # Show error dialog
                 QMessageBox.critical(self, "Error", error_msg)
-                
-                # Reset reconnect counter
                 self.reconnect_attempts = 0
-            
+
             # Re-enable buttons
             self.connect_btn.setEnabled(not self.is_connected)
             self.connect_btn.setText("Connect")
@@ -2537,7 +2903,7 @@ class MainWindow(QWidget):
 
             if log_limit > 0:
                 # LIMITED MODE: Qt auto-trims; no disk needed.
-                logger.info(f"Limited log mode ({log_limit:,} lines) — disk buffering DISABLED")
+                logger.info(f"Limited log mode ({log_limit:,} lines) - disk buffering DISABLED")
                 self._disk_buffering_enabled = False
                 self.log_output.document().setMaximumBlockCount(log_limit)
                 self.console_output.append(
@@ -2551,7 +2917,7 @@ class MainWindow(QWidget):
 
             # UNLIMITED MODE
             ui_trim = AppConfig.get_ui_trim_threshold()
-            # Cap UI lines — Qt auto-removes oldest blocks when limit is exceeded.
+            # Cap UI lines - Qt auto-removes oldest blocks when limit is exceeded.
             self.log_output.document().setMaximumBlockCount(ui_trim)
             self._disk_buffering_enabled = True
 
@@ -2561,7 +2927,7 @@ class MainWindow(QWidget):
             free_gb = shutil.disk_usage(temp_dir).free / (1024 ** 3)
 
             if free_gb < 1.0:
-                logger.warning(f"Low disk space ({free_gb:.1f} GB) — disk buffering DISABLED")
+                logger.warning(f"Low disk space ({free_gb:.1f} GB) - disk buffering DISABLED")
                 self._disk_buffering_enabled = False
                 QMessageBox.warning(
                     self,
@@ -2576,11 +2942,11 @@ class MainWindow(QWidget):
             self._disk_log_lines_count = 0
             self._ui_lines_count = 0
 
-            # Start background writer — all disk I/O is now off the GUI thread.
+            # Start background writer - all disk I/O is now off the GUI thread.
             self._disk_writer = _DiskWriter(str(self._disk_log_path))
 
             logger.info(f"✓ Disk buffer initialized: {self._disk_log_path}")
-            logger.info(f"✓ Unlimited mode — UI capped at {ui_trim:,} lines, rest goes to disk ({free_gb:.1f} GB free)")
+            logger.info(f"✓ Unlimited mode - UI capped at {ui_trim:,} lines, rest goes to disk ({free_gb:.1f} GB free)")
 
         except Exception as e:
             logger.error(f"Error initializing disk buffer: {e}", exc_info=True)
@@ -2641,7 +3007,7 @@ class MainWindow(QWidget):
                 )
             else:
                 label = (
-                    f"⚠ {missing_bottom:,} recent lines are off screen — click Load All Logs to restore"
+                    f"⚠ {missing_bottom:,} recent lines are off screen - click Load All Logs to restore"
                 )
 
             self.load_older_label.setText(label)
@@ -2656,10 +3022,10 @@ class MainWindow(QWidget):
         Load ALL logs from disk into UI.
 
         Two-phase design to avoid reentrancy corruption:
-          PHASE 1 — Read data from disk into memory (progress dialog fires
+          PHASE 1 - Read data from disk into memory (progress dialog fires
                      QApplication::processEvents here, which is safe because
                      we have not yet disabled setMaximumBlockCount).
-          PHASE 2 — Insert collected text into the widget atomically, with
+          PHASE 2 - Insert collected text into the widget atomically, with
                      no progress calls so no event processing can re-enable
                      the block-count cap mid-insert.
 
@@ -2740,7 +3106,7 @@ class MainWindow(QWidget):
                 loaded_so_far += end - offset
                 progress.setValue(loaded_so_far)
 
-            progress.close()  # setMaximumBlockCount still ui_trim here — safe
+            progress.close()  # setMaximumBlockCount still ui_trim here - safe
 
             top_text = "".join(top_chunks)
             bot_text = "".join(bot_chunks)
@@ -2751,7 +3117,7 @@ class MainWindow(QWidget):
             # ── PHASE 2: insert into UI atomically ───────────────────────────
             # Disable auto-trim AFTER reading, immediately before inserting so
             # there is no window in which processEvents() can re-enable it.
-            # Left at 0 — user explicitly chose "Load All".
+            # Left at 0 - user explicitly chose "Load All".
             doc = self.log_output.document()
             doc.setMaximumBlockCount(0)
 
@@ -2884,7 +3250,7 @@ class MainWindow(QWidget):
             if self._disk_buffering_enabled and self._disk_writer:
                 # Detect a crashed writer (e.g. disk full) and disable buffering
                 if self._disk_writer.failed:
-                    logger.error("DiskWriter has failed — disabling disk buffering")
+                    logger.error("DiskWriter has failed - disabling disk buffering")
                     self._disk_buffering_enabled = False
             if self._disk_buffering_enabled and self._disk_writer:
                 try:
@@ -2895,7 +3261,7 @@ class MainWindow(QWidget):
                     # Hard line limit (optional, user-configured)
                     disk_line_limit = AppConfig.get_disk_buffer_limit()
                     if disk_line_limit > 0 and self._disk_log_lines_count >= disk_line_limit:
-                        logger.info(f"Disk line limit ({disk_line_limit:,}) reached — stopping disk writes")
+                        logger.info(f"Disk line limit ({disk_line_limit:,}) reached - stopping disk writes")
                         self._close_disk_buffer()
                         if hasattr(self, 'current_pod_label'):
                             pod_text = self.current_pod_label.text().split("│")[0].strip()
@@ -2909,7 +3275,7 @@ class MainWindow(QWidget):
                         current_size = self._disk_log_path.stat().st_size
                         if current_size >= self._max_disk_file_size:
                             logger.warning(
-                                f"Disk buffer hit {current_size / 1024 / 1024:.0f} MB cap — stopping writes"
+                                f"Disk buffer hit {current_size / 1024 / 1024:.0f} MB cap - stopping writes"
                             )
                             self._close_disk_buffer()
                             if hasattr(self, 'current_pod_label'):
@@ -3053,7 +3419,7 @@ class MainWindow(QWidget):
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title_label)
         
-        # Version — read dynamically so it always matches pyproject.toml / build metadata
+        # Version - read dynamically so it always matches pyproject.toml / build metadata
         version_label = QLabel(f"Version {UpdateConfig.get_current_version()}")
         version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         version_label.setStyleSheet("color: gray;")
@@ -3575,6 +3941,14 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
         
         dialog.exec()
     
+    def _show_gcp_settings_dialog(self):
+        """Show the GCP connection settings dialog."""
+        dialog = GCPSettingsDialog(parent=self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            # Reset the setup-complete flag so wizard re-runs with new settings
+            AppConfig.mark_gcp_setup_complete()
+            self.console_output.append("[INFO] GCP settings saved.\n")
+
     def _show_ssh_folder_config_dialog(self):
         """Show the SSH folder configuration dialog."""
         logger.info("Showing SSH folder configuration dialog")
@@ -3824,7 +4198,7 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
         # Get current metadata
         metadata = AppConfig.get_installation_metadata()
         
-        # Get app version — use UpdateConfig as the single source of truth
+        # Get app version - use UpdateConfig as the single source of truth
         app_version = metadata.get('version') or UpdateConfig.get_current_version()
 
         # Build info message
@@ -4263,7 +4637,7 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
             if result['action'] == 'launched':
                 logger.info("Installer launched, exiting app now")
                 if result.get('message'):
-                    # e.g. Linux terminal opened — user needs to read and confirm
+                    # e.g. Linux terminal opened - user needs to read and confirm
                     msg_box = QMessageBox(self)
                     msg_box.setWindowTitle("Installing Update")
                     msg_box.setIcon(QMessageBox.Icon.Information)
@@ -4478,7 +4852,7 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
 
         current_trim = AppConfig.get_ui_trim_threshold()
 
-        trim_default_radio = QRadioButton("Default  —  100,000 lines  (recommended)")
+        trim_default_radio = QRadioButton("Default  -  100,000 lines  (recommended)")
         trim_default_radio.setChecked(current_trim == 100_000)
         trim_options_layout.addWidget(trim_default_radio)
 
@@ -4501,7 +4875,7 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
 
         trim_note = QLabel(
             "<small>"
-            "Once this limit is reached, the oldest lines are moved to disk — use "
+            "Once this limit is reached, the oldest lines are moved to disk - use "
             "<b>Load Older</b> to bring them back. "
             "Lower value = less RAM used, but \u201cLoad Older\u201d appears more often. "
             "Min: 100 \u2022 Max: 100,000."
@@ -4854,12 +5228,12 @@ icacls %USERPROFILE%\\.ssh\\id_rsa /grant:r "%USERNAME%:R"</pre>
             self.metrics_worker.stop()
             self.metrics_worker.wait(2000)
         
-        # Stop any running worker — terminate if it doesn't exit cleanly
+        # Stop any running worker - terminate if it doesn't exit cleanly
         if self.worker and self.worker.isRunning():
             logger.info("Stopping active worker thread")
             self.worker.stop()
             if not self.worker.wait(2000):
-                logger.warning("Worker thread did not stop on close — forcing termination")
+                logger.warning("Worker thread did not stop on close - forcing termination")
                 self.worker.terminate()
                 self.worker.wait()
         

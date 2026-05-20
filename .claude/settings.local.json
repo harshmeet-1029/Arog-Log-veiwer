@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(venv/Scripts/python.exe -c \"import ast; ast.parse\\(open\\('app/ui/main_window.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(venv/Scripts/python.exe -c \"import ast; ast.parse\\(open\\('app/config.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(venv/Scripts/python.exe -c ' *)",
+      "Bash(venv/Scripts/python.exe -c \"import ast; ast.parse\\(open\\('app/ssh/connection_manager.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK'\\)\")"
+    ]
+  }
+}

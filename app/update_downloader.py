@@ -515,7 +515,7 @@ open "{current_app}"
                     os.chmod(script_path, 0o755)
                     subprocess.Popen(['bash', script_path])
 
-                    # No 'message' key — _install_update will quit immediately
+                    # No 'message' key - _install_update will quit immediately
                     # without showing a dialog, so the 3-second window is safe.
                     return {
                         'success': True,
@@ -697,7 +697,7 @@ rm -f "$0"
                     except Exception as e:
                         logger.warning(f"Terminal {cmd[0]} failed: {e}")
 
-            # 3. Last resort — show manual command
+            # 3. Last resort - show manual command
             return {
                 'success': True,
                 'action': 'prepared',
@@ -733,7 +733,7 @@ rm -f "$0"
             in_stable_path = any(current_exe.startswith(p) for p in all_stable)
 
             if in_stable_path:
-                # User has the binary installed in a proper location —
+                # User has the binary installed in a proper location -
                 # tell them to replace it there so the app launcher icon keeps working
                 return {
                     'success': True,
@@ -749,7 +749,7 @@ rm -f "$0"
                     'install_command': f'sudo mv "{file_path}" "{current_exe}" && sudo chmod +x "{current_exe}"'
                 }
             else:
-                # Running from Downloads or a temp location — just tell them to run it
+                # Running from Downloads or a temp location - just tell them to run it
                 return {
                     'success': True,
                     'action': 'prepared',

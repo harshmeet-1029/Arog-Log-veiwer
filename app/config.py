@@ -24,8 +24,9 @@ class SSHConfig:
     DEFAULT_INTERNAL_HOST = "10.0.34.231"
     DEFAULT_SERVICE_ACCOUNT = "solutions01-prod-us-east-1-eks"
     DEFAULT_CONNECTION_PROVIDER = "ECR"
-    DEFAULT_GCP_SSH_COMMAND = ""
-    DEFAULT_GCP_SERVICE_ACCOUNT = "solutions01-unbxd-us-est4-gke"
+    GCP_VM = "pilot-rc-unbxd-mgmt-host-us-est4-a-gce"
+    GCP_ZONE = "us-east4-a"
+    GCP_SERVICE_ACCOUNT = "solutions01-unbxd-us-est4-gke"
     
     @staticmethod
     def get_jump_host() -> str:
@@ -85,28 +86,21 @@ class SSHConfig:
 
     @staticmethod
     def get_gcp_ssh_command() -> str:
-        """
-        Get base gcloud SSH command used for GCP provider.
-
-        Environment variable: ARGO_GCP_SSH_COMMAND
-        """
-        cmd = os.getenv("ARGO_GCP_SSH_COMMAND", SSHConfig.DEFAULT_GCP_SSH_COMMAND).strip()
-        if not cmd:
-            logger.warning("ARGO_GCP_SSH_COMMAND is not set")
-        else:
-            logger.debug("Using GCP SSH command from environment")
+        """Build the gcloud SSH command using the saved OS Login username."""
+        username = AppConfig.get_gcp_os_login_username()
+        if not username:
+            logger.warning("GCP OS Login username not configured")
+            return ""
+        cmd = (
+            f"gcloud compute ssh --tunnel-through-iap "
+            f"{username}@{SSHConfig.GCP_VM} --zone {SSHConfig.GCP_ZONE}"
+        )
+        logger.debug(f"Built GCP SSH command: {cmd}")
         return cmd
 
     @staticmethod
     def get_gcp_service_account() -> str:
-        """
-        Get GCP sudo target account.
-
-        Environment variable: ARGO_GCP_SERVICE_ACCOUNT
-        """
-        account = os.getenv("ARGO_GCP_SERVICE_ACCOUNT", SSHConfig.DEFAULT_GCP_SERVICE_ACCOUNT).strip()
-        logger.debug(f"Using GCP service account: {account}")
-        return account
+        return SSHConfig.GCP_SERVICE_ACCOUNT
     
     @staticmethod
     def get_ssh_config_path() -> str:
@@ -458,6 +452,31 @@ class AppConfig:
         config = AppConfig.load_config()
         config['word_wrap'] = enabled
         AppConfig.save_config(config)
+
+    @staticmethod
+    def is_gcp_setup_complete() -> bool:
+        """Return True if the user has completed the GCP first-run wizard."""
+        config = AppConfig.load_config()
+        return config.get('gcp_setup_complete', False)
+
+    @staticmethod
+    def mark_gcp_setup_complete() -> None:
+        """Persist that the GCP setup wizard has been completed."""
+        config = AppConfig.load_config()
+        config['gcp_setup_complete'] = True
+        AppConfig.save_config(config)
+
+    # ── GCP connection settings ───────────────────────────────────────────────
+
+    @staticmethod
+    def get_gcp_os_login_username() -> str:
+        return AppConfig.load_config().get('gcp_os_login_username', '')
+
+    @staticmethod
+    def set_gcp_os_login_username(username: str) -> None:
+        config = AppConfig.load_config()
+        config['gcp_os_login_username'] = username.strip()
+        AppConfig.save_config(config)
     
     @staticmethod
     def get_disk_buffer_limit() -> int:
@@ -478,7 +497,7 @@ class AppConfig:
         Get the UI trim threshold: the maximum number of lines kept visible in the
         QTextEdit before the oldest lines are trimmed out (disk buffering mode only).
 
-        Hard cap: 100 000 — values above this are silently clamped down.
+        Hard cap: 100 000 - values above this are silently clamped down.
         Default:  100 000 (matches the previous hardcoded value).
         Min:      user-chosen; no enforced floor (depends on SSD wear tolerance).
         """

@@ -142,7 +142,7 @@ chmod +x ArgoLogViewer-v*-Linux-Portable
 
 Or enable it in the file manager: right-click → **Properties** → **Permissions** → check **"Allow executing as program"** → then double-click.
 
-The **DEB package** (Installer) does not have this issue — it installs properly and appears in your Applications menu.
+The **DEB package** (Installer) does not have this issue - it installs properly and appears in your Applications menu.
 
 ---
 

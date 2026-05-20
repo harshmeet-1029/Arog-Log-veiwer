@@ -1,7 +1,7 @@
-# Disk Buffering — How It Works
+# Disk Buffering - How It Works
 
 > **Applies to:** Unlimited log mode only.  
-> In Limited mode `setMaximumBlockCount` is used instead — no temp file, no disk buffering.
+> In Limited mode `setMaximumBlockCount` is used instead - no temp file, no disk buffering.
 
 ---
 
@@ -27,11 +27,11 @@ The temp file is deleted automatically when you switch pods or close the app.
 | Property | Value |
 |---|---|
 | Location | `{system temp dir}/argo_log_viewer_buffers/logs_{pod}_{pid}.txt` |
-| Max size | **500 MB** — writes stop automatically above this; streaming continues |
+| Max size | **500 MB** - writes stop automatically above this; streaming continues |
 | Encoding | UTF-8 |
 | Write buffer | 8 KB (OS-level buffering) |
 
-### 2. RAM Cache — SSD Wear Protection
+### 2. RAM Cache - SSD Wear Protection
 
 Lines are **not** written to disk one at a time. They accumulate in
 `_disk_buffer_ram_cache` (a Python list) and are flushed every **100 batches**.
@@ -47,7 +47,7 @@ Incoming log batch
 
 `_disk_buffer_cache_size = 100` (fixed, not user-configurable).
 
-### 3. UI Trim — Configurable Threshold
+### 3. UI Trim - Configurable Threshold
 
 The visible `QTextEdit` is kept to at most **`ui_trim_threshold`** lines
 (default **100,000**, user-configurable, hard cap **100,000**).
@@ -59,7 +59,7 @@ When `doc.blockCount() > ui_trim_threshold`:
 3. The **"Load Older"** bar appears at the top of the log view.
 4. The pod label updates: e.g. `my-pod │ 120,000 lines on disk (showing 10,001–120,000)`.
 
-The disk file is **never affected** — all lines remain there.
+The disk file is **never affected** - all lines remain there.
 
 ### 4. Load Older Bar
 
@@ -72,7 +72,7 @@ Appears automatically when `_ui_start_line > 0`.
 
 **Load All warning:** if `total_lines_on_disk > ui_trim_threshold` the user sees a
 confirmation dialog showing line count, file size, and estimated RAM usage before
-proceeding. This is intentional — loading hundreds of thousands of lines on the main
+proceeding. This is intentional - loading hundreds of thousands of lines on the main
 thread can freeze the UI for several seconds.
 
 ### 5. Line Counter Variables
@@ -88,7 +88,7 @@ thread can freeze the UI for several seconds.
 
 | Event | Action |
 |---|---|
-| User switches pod | `_close_disk_buffer()` — flushes RAM cache, closes file |
+| User switches pod | `_close_disk_buffer()` - flushes RAM cache, closes file |
 | App exits normally | `_close_disk_buffer()` + deletes temp files older than 1 hour |
 | App crashes | Temp files remain; cleaned up automatically on next launch |
 
@@ -102,15 +102,15 @@ Kubernetes log line arrives
         ▼
 _process_log_output_batch()
         │
-        ├─► STEP 1 — disk write (SSD-friendly batching)
+        ├─► STEP 1 - disk write (SSD-friendly batching)
         │       RAM cache.append(line)
         │       if len(cache) >= 100:
         │           write cache to disk file
         │           cache.clear()
         │
-        ├─► STEP 2 — append to QTextEdit
+        ├─► STEP 2 - append to QTextEdit
         │
-        └─► STEP 3 — UI trim check
+        └─► STEP 3 - UI trim check
                 threshold = AppConfig.get_ui_trim_threshold()
                 if QTextEdit.blockCount() > threshold:
                     trim = max(1000, threshold // 10)
@@ -121,12 +121,12 @@ _process_log_output_batch()
 
 ---
 
-## User-Configurable Setting — `ui_trim_threshold`
+## User-Configurable Setting - `ui_trim_threshold`
 
 ### What it controls
 
-1. **When the viewer starts trimming** — older lines are pushed out of view and onto disk.
-2. **When "Load All" shows its warning dialog** — if total disk lines exceed the threshold,
+1. **When the viewer starts trimming** - older lines are pushed out of view and onto disk.
+2. **When "Load All" shows its warning dialog** - if total disk lines exceed the threshold,
    the user is warned before loading everything into memory.
 
 ### Trade-off
@@ -142,14 +142,14 @@ _process_log_output_batch()
 | | Value | Reason |
 |---|---|---|
 | **Default** | 100,000 | Matches the original hardcoded value; works well for most systems |
-| **Min** | 100 | Practical floor — below this the viewer would trim every few lines |
+| **Min** | 100 | Practical floor - below this the viewer would trim every few lines |
 | **Max** | 100,000 (hard cap) | Above this, RAM usage and "Load All" freeze risk become unacceptable |
 
 ### Where to change it
 
 **Settings → Advanced Settings → Scroll-back && Full Save**
 
-- **Default — 100,000 lines (recommended):** uses the hard cap; no config written.
+- **Default - 100,000 lines (recommended):** uses the hard cap; no config written.
 - **Custom:** enter any value between 100 and 100,000. Saved as `ui_trim_threshold`
   in `~/.argo-log-viewer/config.json`.
 
@@ -162,11 +162,11 @@ Config class: `AppConfig.get_ui_trim_threshold()` / `AppConfig.set_ui_trim_thres
 
 | Thing | Why fixed |
 |---|---|
-| 500 MB max file size | Safety cap — prevents runaway disk usage |
-| RAM cache flush interval (100 batches) | SSD protection — changing it offers no user benefit |
+| 500 MB max file size | Safety cap - prevents runaway disk usage |
+| RAM cache flush interval (100 batches) | SSD protection - changing it offers no user benefit |
 | Disk buffering on/off | Always on in Unlimited mode; no temp file in Limited mode |
 | Temp file location | OS temp dir is correct; cleaned up automatically |
-| Trim chunk size | Always `max(1000, threshold // 10)` — 10 % of threshold |
+| Trim chunk size | Always `max(1000, threshold // 10)` - 10 % of threshold |
 
 ---
 

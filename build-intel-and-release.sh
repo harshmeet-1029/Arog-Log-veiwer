@@ -135,7 +135,7 @@ echo ""
 export MACOSX_DEPLOYMENT_TARGET=11.0
 
 # ══════════════════════════════════════════════════════════════════════════════
-# BUILD 1 — DMG variant  (executable: ArgoLogViewer-Installer, bundle: ArgoLogViewer.app)
+# BUILD 1 - DMG variant  (executable: ArgoLogViewer-Installer, bundle: ArgoLogViewer.app)
 # Matches the Apple Silicon CI job exactly.
 # ══════════════════════════════════════════════════════════════════════════════
 echo -e "${BLUE}[1/2] Generating build metadata for DMG variant...${NC}"
@@ -198,7 +198,7 @@ echo -e "${GREEN}   DMG created: ArgoLogViewer-v${VERSION}-macOS-Intel.dmg${NC}"
 echo ""
 
 # ══════════════════════════════════════════════════════════════════════════════
-# BUILD 2 — ZIP variant  (executable: ArgoLogViewer-Portable, bundle: ArgoLogViewer-ZIP.app)
+# BUILD 2 - ZIP variant  (executable: ArgoLogViewer-Portable, bundle: ArgoLogViewer-ZIP.app)
 # Matches the Apple Silicon CI job exactly.
 # ══════════════════════════════════════════════════════════════════════════════
 echo -e "${BLUE}[2/2] Regenerating build metadata for ZIP variant...${NC}"

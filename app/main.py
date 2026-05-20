@@ -157,7 +157,7 @@ def _set_application_icon(app):
             logger.warning("Could not load application icon - file not found")
 
         # On Linux, only register a local .desktop file for PORTABLE builds.
-        # DEB builds already have a system-wide .desktop via the package installer —
+        # DEB builds already have a system-wide .desktop via the package installer -
         # registering again from the app would create a duplicate icon in the launcher.
         if sys.platform.startswith('linux') and getattr(sys, 'frozen', False) and icon_path:
             try:
@@ -175,10 +175,10 @@ def _set_application_icon(app):
                     _register_linux_portable_icon(icon_path)
                 else:
                     logger.info(
-                        f"Skipping .desktop registration — portable binary not in stable location: {exe}"
+                        f"Skipping .desktop registration - portable binary not in stable location: {exe}"
                     )
             else:
-                logger.info("Skipping .desktop registration — DEB build has system-wide .desktop already")
+                logger.info("Skipping .desktop registration - DEB build has system-wide .desktop already")
 
     except Exception as e:
         logger.error(f"Error setting application icon: {e}", exc_info=True)
@@ -189,7 +189,7 @@ def _register_linux_portable_icon(icon_src: str):
     Install a local .desktop file and icon for the Linux portable build so
     GNOME/KDE shows the correct icon in the dock, alt-tab, and file manager.
     Uses the bundled app/argologviewer.desktop as a template.
-    Safe to call on every launch — skips if already up to date.
+    Safe to call on every launch - skips if already up to date.
     """
     try:
         import shutil
